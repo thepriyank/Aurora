@@ -78,7 +78,7 @@ Record these — the plan's model choices depend on them:
 - [ ] Do **not** open the same vault from two devices at the same second during setup
 
 ### B2. 🔴 Google Drive sync
-- [ ] Google account (you have one: [redacted])
+- [ ] Google account
 - [ ] **Google Drive for desktop** on Windows + macOS — https://www.google.com/drive/download/
 - [ ] Decide the vault location inside the synced Drive folder, e.g. `…/My Drive/Vault`
 - [ ] **Android sync** — pick one:

@@ -6,7 +6,7 @@
 > keep/patch/drop map is `docs/05_REPO_REUSE_MAP.md`.
 
 - Current phase: **Phase 1 — swap the brain to a local LLM**
-- Owner: [redacted] · Windows (ARM), local Ollama
+- Owner: local user · Windows (ARM), local Ollama
 - Assistant name lives in `config/jarvis.json` — never hardcode it
 
 ---
