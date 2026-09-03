@@ -21,8 +21,9 @@ def _chat() -> int:
         except (AttributeError, ValueError):
             pass
 
-    from . import core
+    from . import core, memory
     from .config import ConfigError, load_brain_cfg, load_persona
+    from .tools import Dispatcher, load_tools_config, ollama_schemas
 
     try:
         cfg = load_brain_cfg(required=True)
@@ -32,13 +33,35 @@ def _chat() -> int:
 
     persona = load_persona()
     history: list[dict] = []
-    print(f"chat with the local brain ({cfg.local.model}). Ctrl-C or 'exit' to quit.\n")
+
+    # A typed confirmation gate so confirm-tier tools can be exercised here the
+    # same way the spoken gate does on the voice line.
+    class _Allow:
+        behavior = "allow"
+
+    class _Deny:
+        behavior = "deny"
+
+        def __init__(self, msg: str) -> None:
+            self.message = msg
+
+    def _typed_gate(tool: str, args: dict, _ctx: dict):
+        ans = input(f"  [confirm] run {tool} {args}? (y/N) ").strip().lower()
+        return _Allow() if ans in {"y", "yes"} else _Deny("you declined at the prompt")
+
+    tools_cfg = load_tools_config()
+    dispatch = Dispatcher(tools_cfg, can_use_tool=_typed_gate)
+    schemas = ollama_schemas(tools_cfg)
+    print(f"chat with the local brain ({cfg.local.model}), {len(schemas)} tools. "
+          f"Ctrl-C or 'exit' to quit.\n")
 
     async def turn(text: str) -> None:
         reply: list[str] = []
+        hint = memory.recall_hint(text, tools_cfg.roots["vault"])
         async for sentence in core.run_turn(
             text, history, brain_cfg=cfg, persona=persona,
             discipline="Spoken style: short sentences, no markdown.",
+            tools=schemas, dispatch=dispatch, extra_context=hint,
         ):
             print(f"  {sentence}", flush=True)
             reply.append(sentence)
@@ -46,6 +69,11 @@ def _chat() -> int:
         if joined:
             history.append({"role": "user", "content": text})
             history.append({"role": "assistant", "content": joined})
+            written = await memory.remember(
+                text, joined, brain_cfg=cfg, vault=tools_cfg.roots["vault"])
+            if written:
+                dispatch.note("memory.remember", written)
+                print(f"  · remembered: {'; '.join(written)}", flush=True)
 
     while True:
         try:

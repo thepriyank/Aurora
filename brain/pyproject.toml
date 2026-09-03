@@ -12,7 +12,7 @@ dependencies = [
 jarvis-brain = "jarvis_brain.__main__:main"
 
 [tool.setuptools]
-packages = ["jarvis_brain", "jarvis_brain.providers"]
+packages = ["jarvis_brain", "jarvis_brain.providers", "jarvis_brain.tools"]
 
 [tool.uv]
 package = true

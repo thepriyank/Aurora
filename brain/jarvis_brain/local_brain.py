@@ -26,10 +26,11 @@ import os
 from collections.abc import AsyncIterator
 from pathlib import Path
 
-from . import core
+from . import core, memory
 from .config import CLAUDE_MD, load_brain_cfg, load_persona
 from .providers.ollama import OllamaClient, OllamaDown
 from .sessions import SessionLog
+from .tools import Dispatcher, load_tools_config, ollama_schemas
 
 _MAX_HISTORY_TURNS = 24  # user+assistant pairs kept in the window
 
@@ -85,6 +86,11 @@ class LocalBrain:
         self._persona = _persona()
         self._discipline = _discipline()
         self._session = SessionLog()  # transcript -> vault/04 - Sessions/<date>.md
+        # Phase 2: native tools + the spoken confirmation gate (can_use_tool is
+        # backtalk's make_permission_gate, or None outside the voice line).
+        self._tools_cfg = load_tools_config()
+        self._dispatch = Dispatcher(self._tools_cfg, can_use_tool=can_use_tool)
+        self._tool_schemas = ollama_schemas(self._tools_cfg)
         self._stop = False
         self._perm_mode = "ask"
 
@@ -109,6 +115,7 @@ class LocalBrain:
     async def ask_stream(self, utterance: str) -> AsyncIterator[str]:
         self._stop = False
         reply_parts: list[str] = []
+        hint = memory.recall_hint(utterance, self._tools_cfg.roots["vault"])
         async for sentence in core.run_turn(
             utterance,
             self._history,
@@ -116,6 +123,9 @@ class LocalBrain:
             persona=self._persona,
             discipline=self._discipline,
             stop_check=lambda: self._stop,
+            tools=self._tool_schemas,
+            dispatch=self._dispatch,
+            extra_context=hint,
         ):
             reply_parts.append(sentence)
             yield sentence
@@ -127,9 +137,25 @@ class LocalBrain:
             if len(self._history) > _MAX_HISTORY_TURNS * 2:
                 self._history = self._history[-_MAX_HISTORY_TURNS * 2:]
             self._session.append(utterance, reply)
+            await self._store_durable_facts(utterance, reply)
         # rough bookkeeping so "usage report" has something to say
         self.session["turns"] += 1
         self.session["out_tokens"] += max(1, len(reply) // 4)
+
+    async def _store_durable_facts(self, utterance: str, reply: str) -> None:
+        """Phase 2 write policy: extract durable facts and append them to the
+        vault. Best-effort — a failure must never break the turn."""
+        try:
+            written = await memory.remember(
+                utterance, reply,
+                brain_cfg=self._cfg,
+                vault=self._tools_cfg.roots["vault"],
+            )
+            if written:
+                self._dispatch.note("memory.remember", written)
+        except Exception as e:  # noqa: BLE001
+            import sys
+            print(f"[local_brain] memory step failed: {e}", file=sys.stderr)
 
     async def interrupt(self) -> None:
         self._stop = True

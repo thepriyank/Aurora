@@ -5,7 +5,7 @@
 > Keep it true for both. The full plan is in `docs/00_MASTER_BUILD_PLAN.md`; the upstream
 > keep/patch/drop map is `docs/05_REPO_REUSE_MAP.md`.
 
-- Current phase: **Phase 1 — swap the brain to a local LLM**
+- Current phase: **Phase 2 — tools & vault memory** (Phase 1 code complete; voice round-trip pending)
 - Owner: local user · Windows (ARM), local Ollama
 - Assistant name lives in `config/jarvis.json` — never hardcode it
 
@@ -115,7 +115,7 @@ PTT / typed  → vendor/backtalk (STT, signal bus)
 
 - ✅ Phase 0 — fork & assemble: repo scaffolded, `vendor/backtalk` imported as a subtree, docs in `docs/`
 - 🟡 Phase 1 — local brain: `jarvis_brain` + first-run wizard done; `backtalk` patched (`main.py` import branch + `pyproject.toml` dep). Local model = `qwen2.5:3b-instruct` (`config/models.yaml`). Verified: wizard `check`, config load/save, Ollama provider (health/list/error), `core.run_turn` + `LocalBrain` stream real replies, **multi-turn memory holds on the 3B**, transcripts persist to `Vault/04 - Sessions/<date>.md` (`jarvis_brain/sessions.py`), `jarvis_brain/server.py` serves `GET /health` + `POST /turn` (SSE) for the future Android client, `brain: "claude"` switch untouched. **Pending:** full `uv sync` of `vendor/backtalk` (pulls whisper/kokoro) + real PTT voice round-trip on the box.
-- ⬜ Phase 2 — tools & vault memory
+- 🟡 Phase 2 — tools & vault memory: `jarvis_brain/tools/` — native tools (fs / shell / web / git / Obsidian vault), `config/tools.yaml` with `auto`/`confirm`/`never` tiers, filesystem jail to the configured roots (`jail.py`), `Dispatcher` routes `confirm` to backtalk's spoken gate (or a typed prompt in `chat`) and logs every call to `brain/audit.jsonl` (`gate.py`). Ollama tool-calling loop in `core.run_turn`; `providers/ollama.py` gains non-streaming `chat()`. `jarvis_brain/memory.py` — post-turn durable-fact extractor (cheap local call → `People/`,`Projects/` notes with source/confidence/sensitivity, dated corrections) + `recall_hint()` pre-turn vault priming. Verified against the 3B: coffee-preference written + recalled in a fresh session, one-confirmation file move, destructive request refused (no delete tool exposed; shell `rm -rf` pattern-blocked), audit trail. MCP servers declared in `tools.yaml` but not wired yet (native tools cover the DoD). **Pending:** MCP client; 3B fact-categorisation is rough.
 - ⬜ Phase 3 — Google Drive memory sync
 - ⬜ Phase 4 — "big brain" escalation
 - ⬜ Phase 5 — desktop 3D floating overlay

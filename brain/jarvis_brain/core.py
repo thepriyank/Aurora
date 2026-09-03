@@ -11,14 +11,26 @@ persona + conversation window -> local model -> spoken sentences.
 """
 from __future__ import annotations
 
+import json
 import re
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 
-from .config import BrainCfg
+from .config import BrainCfg, LocalModelCfg
 from .providers.ollama import OllamaClient
 
 # Same rule backtalk's mouth expects: break after . ! ? followed by whitespace.
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
+
+# Appended to the system prompt only when tools are in play. Short on purpose —
+# a small local model follows a tight brief.
+_TOOL_GUIDANCE = (
+    "You have tools. Before answering from memory about the user's preferences, "
+    "past notes, or files, call vault.search or fs.search to check. Use the "
+    "vault tools to save and recall notes. If a request is destructive — "
+    "deleting many files, wiping or formatting a folder or disk — refuse plainly "
+    "and say why; do not attempt it. Give tool paths relative to the vault or "
+    "workspace."
+)
 # Reasoning models (qwen3, deepseek-r1, ...) emit a visible chain of thought.
 # It must never be spoken. Strip whole <think>…</think> spans, and while the
 # opening tag is still unmatched, withhold everything after it.
@@ -89,6 +101,61 @@ def build_messages(
     return msgs
 
 
+def _parse_args(raw) -> dict:
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str):
+        try:
+            v = json.loads(raw)
+            return v if isinstance(v, dict) else {"value": v}
+        except ValueError:
+            return {}
+    return {}
+
+
+async def _tool_rounds(
+    client: OllamaClient,
+    messages: list[dict],
+    *,
+    model: str,
+    lc: LocalModelCfg,
+    tools: list[dict],
+    dispatch: Callable[[str, dict], Awaitable[str]],
+    max_rounds: int,
+) -> None:
+    """Run non-streaming tool-calling rounds in place on `messages`, appending
+    the model's tool_calls and each tool result, until the model stops asking
+    for tools (or the round cap is hit). The final spoken answer is produced
+    afterwards by the streaming pass."""
+    for _ in range(max_rounds):
+        msg = await client.chat(
+            messages, model=model, tools=tools,
+            keep_alive=lc.keep_alive, temperature=lc.temperature,
+            num_ctx=lc.context,
+        )
+        calls = msg.get("tool_calls") or []
+        if not calls:
+            return
+        messages.append({
+            "role": "assistant",
+            "content": msg.get("content", "") or "",
+            "tool_calls": calls,
+        })
+        for call in calls:
+            fn = (call.get("function") or {})
+            name = fn.get("name", "")
+            args = _parse_args(fn.get("arguments"))
+            result = await dispatch(name, args)
+            messages.append({
+                "role": "tool", "tool_name": name, "content": str(result),
+            })
+    # cap reached: nudge the model to answer with what it has
+    messages.append({
+        "role": "user",
+        "content": "Answer now with what you have. Do not call more tools.",
+    })
+
+
 async def run_turn(
     user_text: str,
     history: list[dict] | None = None,
@@ -97,8 +164,17 @@ async def run_turn(
     persona: str,
     discipline: str = "",
     stop_check: Callable[[], bool] | None = None,
+    tools: list[dict] | None = None,
+    dispatch: Callable[[str, dict], Awaitable[str]] | None = None,
+    max_tool_rounds: int = 5,
+    extra_context: str = "",
 ) -> AsyncIterator[str]:
-    """Yield complete, speakable sentences for one user turn (local model)."""
+    """Yield complete, speakable sentences for one user turn (local model).
+
+    When `tools` and `dispatch` are given, the model may call tools first
+    (non-streaming rounds); the spoken answer then streams as usual with the
+    tool results in context.
+    """
     lc = brain_cfg.local
     if lc.provider != "ollama":
         raise NotImplementedError(f"local provider {lc.provider!r} not wired yet")
@@ -107,6 +183,16 @@ async def run_turn(
     messages = build_messages(
         user_text, history, persona=persona, discipline=discipline
     )
+    if extra_context.strip():
+        messages[0]["content"] += "\n\n---\n" + extra_context.strip()
+
+    if tools and dispatch is not None:
+        messages[0]["content"] += "\n\n---\n" + _TOOL_GUIDANCE
+        await _tool_rounds(
+            client, messages, model=lc.model, lc=lc, tools=tools,
+            dispatch=dispatch, max_rounds=max_tool_rounds,
+        )
+
     think = _ThinkFilter()
     buf = ""
 

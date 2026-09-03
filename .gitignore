@@ -37,3 +37,10 @@ state/
 # os
 .DS_Store
 Thumbs.db
+
+# tool config
+config/tools.yaml
+
+# brain runtime logs
+brain/audit.jsonl
+brain/usage.jsonl

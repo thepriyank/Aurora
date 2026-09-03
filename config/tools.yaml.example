@@ -1,0 +1,67 @@
+# config/tools.yaml — the tool registry and its permission tiers.
+#
+# Copy to config/tools.yaml (git-ignored) and edit. Missing file = defaults below.
+#
+# Tiers:
+#   auto     read-only / trivially reversible — runs silently
+#   confirm  has side effects — the assistant says what it's about to do and
+#            waits for a spoken (or typed) "yes"
+#   never    destructive — blocked outright, no voice override
+#
+# Filesystem + shell + git tools are JAILED to `roots`. Nothing outside is
+# reachable. Add a path here to widen access (e.g. ~/Downloads for the
+# "move my invoices" workflow).
+
+roots:
+  # vault:    defaults to config/jarvis.json -> vault_path, else <repo>/Vault
+  # workspace: defaults to config/jarvis.json -> workspace_path, else ~/jarvis-workspace
+  # downloads: ~/Downloads      # example: uncomment to let the agent see Downloads
+
+tiers:
+  fs.read: auto
+  fs.list: auto
+  fs.search: auto
+  fs.write: confirm
+  fs.move: confirm
+  fs.mkdir: confirm
+  fs.delete: never
+  shell.run: confirm
+  web.search: auto
+  web.fetch: auto
+  git.status: auto
+  git.log: auto
+  git.diff: auto
+  git.add: confirm
+  git.commit: confirm
+  vault.append_daily_note: auto
+  vault.create_note: confirm
+  vault.search: auto
+  vault.read_note_set: auto
+
+shell:
+  # only these program names may run (argv[0] basename); everything else is refused
+  allow: [ls, cat, echo, pwd, date, whoami, git, rg, grep, find, head, tail, wc, python, python3, node, npm, uv]
+  # if the command string contains any of these, it is hard-blocked before the gate
+  deny_patterns:
+    - "rm -rf"
+    - "rm -r "
+    - "rm -fr"
+    - ":(){"
+    - "mkfs"
+    - "dd if="
+    - "> /dev/sd"
+    - "format "
+    - "del /"
+    - "rmdir /s"
+    - "shutdown"
+    - "reg delete"
+    - "diskpart"
+
+web:
+  search_url: "https://duckduckgo.com/html/"
+  max_fetch_bytes: 200000
+  timeout_s: 15
+
+# MCP servers (declared here, wired in a later pass — native tools cover Phase 2):
+# mcp_servers:
+#   filesystem: { command: "npx", args: ["-y", "@modelcontextprotocol/server-filesystem", "~/jarvis-workspace"] }

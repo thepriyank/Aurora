@@ -87,6 +87,51 @@ class OllamaClient:
             raise OllamaDown(f"pull failed for {model!r}: {e}") from e
 
     # -- inference --------------------------------------------------------- #
+    async def chat(
+        self,
+        messages: list[dict],
+        *,
+        model: str,
+        tools: list[dict] | None = None,
+        keep_alive: object = -1,
+        temperature: float = 0.7,
+        num_ctx: int | None = None,
+    ) -> dict:
+        """One non-streaming /api/chat round. Returns the `message` object,
+        which may carry `tool_calls`. Used for the tool loop; the final
+        spoken answer still streams via chat_stream()."""
+        options: dict = {"temperature": temperature}
+        if num_ctx:
+            options["num_ctx"] = num_ctx
+        payload: dict = {
+            "model": model,
+            "messages": messages,
+            "stream": False,
+            "keep_alive": keep_alive,
+            "options": options,
+        }
+        if tools:
+            payload["tools"] = tools
+        timeout = httpx.Timeout(self.connect_timeout, read=self.read_timeout)
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as c:
+                resp = await c.post(f"{self.base_url}/api/chat", json=payload)
+                if resp.status_code >= 400:
+                    body = resp.text.strip()
+                    try:
+                        body = resp.json().get("error", body)
+                    except ValueError:
+                        pass
+                    raise OllamaError(f"ollama returned {resp.status_code}: {body[:400]}")
+                data = resp.json()
+        except httpx.ConnectError as e:
+            raise OllamaDown(
+                f"cannot reach Ollama at {self.base_url} — is `ollama serve` running?"
+            ) from e
+        except (httpx.HTTPError, OSError) as e:
+            raise OllamaError(f"chat call failed: {e}") from e
+        return data.get("message") or {}
+
     async def chat_stream(
         self,
         messages: list[dict],
