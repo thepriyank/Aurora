@@ -62,8 +62,17 @@ import threading
 import time
 
 from backtalk import signals
-from backtalk.brain import WarmBrain
 from backtalk.config import CFG
+
+# --- jarvis fork: the ONLY functional patch to backtalk (see
+#     docs/05_REPO_REUSE_MAP.md). backtalk.json "brain" selects the runtime:
+#       "local"  (default here) -> jarvis_brain drives a local Ollama model
+#       "claude"                -> upstream backtalk, unchanged, for bisecting
+#     LocalBrain mirrors WarmBrain's surface, so nothing else below changes. ---
+if CFG.get("brain", "local") == "claude":
+    from backtalk.brain import WarmBrain
+else:
+    from jarvis_brain.local_brain import LocalBrain as WarmBrain
 from backtalk.ears import (Ears, explain_audio_failure, record_held,
                            warm as warm_ears)
 from backtalk.mouth import Mouth
