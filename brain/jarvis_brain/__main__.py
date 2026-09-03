@@ -11,6 +11,15 @@ import sys
 
 
 def _chat() -> int:
+    # Windows consoles default to a legacy codepage; force UTF-8 so Hindi /
+    # Hinglish input and output survive the REPL. (backtalk feeds text via STT,
+    # not stdin, so this only matters for this dev REPL.)
+    for stream in (sys.stdin, sys.stdout):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
+
     from . import core
     from .config import ConfigError, load_brain_cfg, load_persona
 

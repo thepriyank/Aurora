@@ -57,7 +57,7 @@ class LocalModelCfg:
     base_url: str = "http://localhost:11434"
     model: str = ""
     keep_alive: Any = -1
-    context: int = 32768
+    context: int = 8192  # voice turns are short; keeps the KV cache light
     temperature: float = 0.7
     languages: list[str] = field(default_factory=lambda: ["en"])
 
@@ -112,7 +112,7 @@ def load_brain_cfg(*, required: bool = True) -> BrainCfg:
         base_url=str(lraw.get("base_url", "http://localhost:11434")).rstrip("/"),
         model=lraw.get("model", "") or "",
         keep_alive=lraw.get("keep_alive", -1),
-        context=int(lraw.get("context", 32768)),
+        context=int(lraw.get("context", 8192)),
         temperature=float(lraw.get("temperature", 0.7)),
         languages=list(lraw.get("languages", ["en"])),
     )
@@ -187,18 +187,43 @@ def load_jarvis_json() -> dict:
         return {}
 
 
-def load_persona() -> str:
-    """The agent's identity: the home-folder CLAUDE.md, verbatim.
+_PERSONA_START = "<!-- PERSONA:START -->"
+_PERSONA_END = "<!-- PERSONA:END -->"
 
-    Phase 3 will also fold in the vault's VAULT-INDEX.md. For now, the
-    CLAUDE.md is the whole persona. Missing file -> a bare fallback.
+
+def _bare_persona() -> str:
+    ident = load_jarvis_json()
+    name = ident.get("name", "Assistant")
+    if ident.get("persona"):
+        return str(ident["persona"]).replace("{name}", name).strip()
+    return (
+        f"You are {name}, a calm, concise personal assistant. "
+        f"You reply in the same language the user used. You never pad answers. "
+        f"Your replies are spoken aloud, so keep them short and plain — no markdown."
+    )
+
+
+def load_persona() -> str:
+    """The agent's spoken identity.
+
+    Precedence:
+      1. the block between <!-- PERSONA:START --> / <!-- PERSONA:END --> in CLAUDE.md
+      2. a `persona` string in config/jarvis.json
+      3. a bare generated line
+
+    The WHOLE CLAUDE.md is a dev/architecture document — feeding all of it to a
+    small local model makes it answer *about* the file. The marked block is the
+    part that actually is the character. (Phase 3 folds in the vault's
+    VAULT-INDEX.md here too.)
     """
     try:
-        return CLAUDE_MD.read_text(encoding="utf-8").strip()
+        text = CLAUDE_MD.read_text(encoding="utf-8")
     except FileNotFoundError:
-        ident = load_jarvis_json()
-        name = ident.get("name", "Assistant")
-        return (
-            f"You are {name}, a calm, concise personal assistant. "
-            f"You reply in the same language the user used. You never pad answers."
-        )
+        return _bare_persona()
+
+    if _PERSONA_START in text and _PERSONA_END in text:
+        block = text.split(_PERSONA_START, 1)[1].split(_PERSONA_END, 1)[0].strip()
+        if block:
+            name = load_jarvis_json().get("name", "Assistant")
+            return block.replace("{name}", name)
+    return _bare_persona()

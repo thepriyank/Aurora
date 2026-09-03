@@ -15,7 +15,7 @@ brain:
     base_url: http://localhost:11434
     model: qwen3:8b            # pick a TOOL-CALLING model; re-check ollama.com/library
     keep_alive: -1             # keep the model resident between turns (latency)
-    context: 32768
+    context: 8192            # voice turns are short; raise if you feed long docs
     temperature: 0.7
     languages: [en, hi]
 

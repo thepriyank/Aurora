@@ -279,7 +279,7 @@ def run_wizard(*, use_defaults: bool = False) -> int:
             base_url=base_url,
             model=model,
             keep_alive=existing.local.keep_alive if existing.is_configured else -1,
-            context=existing.local.context if existing.is_configured else 32768,
+            context=existing.local.context if existing.is_configured else 8192,
             temperature=existing.local.temperature,
             languages=existing.local.languages or ["en", "hi"],
         ),

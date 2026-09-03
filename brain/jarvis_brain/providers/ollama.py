@@ -120,7 +120,24 @@ class OllamaClient:
                             f"model {model!r} is not pulled "
                             f"(run: ollama pull {model})"
                         )
-                    resp.raise_for_status()
+                    if resp.status_code >= 400:
+                        body = (await resp.aread()).decode("utf-8", "replace")
+                        detail = body.strip()
+                        try:
+                            detail = json.loads(body).get("error", detail)
+                        except ValueError:
+                            pass
+                        low = detail.lower()
+                        if "out of memory" in low or "unable to allocate" in low:
+                            raise OllamaError(
+                                f"{model!r} needs more RAM/VRAM than is free right "
+                                f"now. Try a smaller model (e.g. llama3.2:3b, "
+                                f"qwen3:4b) via `python -m jarvis_brain configure`, "
+                                f"or free memory. [ollama: {detail[:200]}]"
+                            )
+                        raise OllamaError(
+                            f"ollama returned {resp.status_code}: {detail[:400]}"
+                        )
                     async for line in resp.aiter_lines():
                         if stop_check and stop_check():
                             return
