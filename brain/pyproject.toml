@@ -1,0 +1,18 @@
+[project]
+name = "jarvis-brain"
+version = "0.1.0"
+description = "Local-LLM agent core for the Jarvis assistant. Drop-in brain for backtalk."
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "httpx>=0.27.0",
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+jarvis-brain = "jarvis_brain.__main__:main"
+
+[tool.setuptools]
+packages = ["jarvis_brain", "jarvis_brain.providers"]
+
+[tool.uv]
+package = true

@@ -1,0 +1,19 @@
+{
+  "name": "Aria",
+  "wake_words": ["hey aria", "aria"],
+  "languages": ["en", "hi"],
+  "default_language": "en",
+  "vault_path": "",
+  "workspace_path": "~/jarvis-workspace",
+
+  "trigger_phrases": {
+    "big_brain": ["use the big brain", "ask the big model", "बड़ा मॉडल इस्तेमाल करो"],
+    "see_me": ["see me", "watch my hands", "मुझे देखो"],
+    "stop_see_me": ["stop seeing me", "hands off", "बस करो"]
+  },
+
+  "bus": {
+    "signals_dir": "vendor/backtalk",
+    "barehands_state_dir": ""
+  }
+}

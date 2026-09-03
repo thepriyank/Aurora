@@ -1,0 +1,39 @@
+# secrets / local config
+.env
+config/models.yaml
+config/jarvis.local.json
+secrets/
+
+# the memory vault lives OUTSIDE this repo (Google Drive) — never commit it
+Vault/
+vault/
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.uv/
+.python-version
+
+# node / electron (later phases)
+node_modules/
+dist/
+out/
+
+# backtalk / model caches & runtime
+vendor/backtalk/backtalk.json
+vendor/backtalk/.venv/
+vendor/**/logs/
+*.log
+.voice_state
+.voice_waveform
+.voice_loading_pid
+.backtalk_session
+.rate_limit*
+state/
+
+# os
+.DS_Store
+Thumbs.db

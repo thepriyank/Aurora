@@ -1,0 +1,74 @@
+"""`python -m jarvis_brain <cmd>`
+
+    configure [--defaults]   first-run wizard: pick/pull the local model
+    check                    exit 0 iff ready to run (used by start.ps1/.sh)
+    chat                     a plain REPL against the local brain (no voice)
+"""
+from __future__ import annotations
+
+import asyncio
+import sys
+
+
+def _chat() -> int:
+    from . import core
+    from .config import ConfigError, load_brain_cfg, load_persona
+
+    try:
+        cfg = load_brain_cfg(required=True)
+    except ConfigError as e:
+        print(f"{e}", file=sys.stderr)
+        return 1
+
+    persona = load_persona()
+    history: list[dict] = []
+    print(f"chat with the local brain ({cfg.local.model}). Ctrl-C or 'exit' to quit.\n")
+
+    async def turn(text: str) -> None:
+        reply: list[str] = []
+        async for sentence in core.run_turn(
+            text, history, brain_cfg=cfg, persona=persona,
+            discipline="Spoken style: short sentences, no markdown.",
+        ):
+            print(f"  {sentence}", flush=True)
+            reply.append(sentence)
+        joined = " ".join(reply).strip()
+        if joined:
+            history.append({"role": "user", "content": text})
+            history.append({"role": "assistant", "content": joined})
+
+    while True:
+        try:
+            text = input("you> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return 0
+        if text.lower() in {"exit", "quit"}:
+            return 0
+        if not text:
+            continue
+        try:
+            asyncio.run(turn(text))
+        except Exception as e:  # noqa: BLE001 - REPL: show and keep going
+            print(f"  ! {e}", file=sys.stderr)
+
+
+def main(argv: list[str] | None = None) -> int:
+    argv = list(argv if argv is not None else sys.argv[1:])
+    cmd = argv[0] if argv else "configure"
+    rest = argv[1:]
+
+    if cmd == "configure":
+        from .configure import main as wiz
+        return wiz(rest)
+    if cmd == "check":
+        from .configure import check
+        return check()
+    if cmd == "chat":
+        return _chat()
+    print(__doc__)
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

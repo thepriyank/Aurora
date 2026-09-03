@@ -1,0 +1,33 @@
+# config/models.yaml — the brain registry.
+#
+# This file is written by the first-run wizard (`python -m jarvis_brain configure`,
+# which start.ps1 / start.sh run automatically when it's missing). Edit it by hand
+# any time; it hot-reloads on the next turn. It is git-ignored — it's yours.
+#
+# No model names in code. Adding/swapping a model is only ever a change here.
+
+brain:
+  # local | big  — the default mode. Runtime-switchable by voice ("use the big brain").
+  mode: local
+
+  local:
+    provider: ollama
+    base_url: http://localhost:11434
+    model: qwen3:8b            # pick a TOOL-CALLING model; re-check ollama.com/library
+    keep_alive: -1             # keep the model resident between turns (latency)
+    context: 32768
+    temperature: 0.7
+    languages: [en, hi]
+
+  # Only used on the "use the big brain" command. Tried in order.
+  # Leave empty ([]) to disable cloud escalation entirely.
+  big:
+    - provider: openrouter
+      model: deepseek/deepseek-chat      # verify current id at build time
+      api_key_env: OPENROUTER_API_KEY
+    - provider: anthropic
+      model: claude-sonnet-5
+      api_key_env: ANTHROPIC_API_KEY
+
+  monthly_cloud_cap_inr: 1000
+  never_escalate_tags: [private, health, finance_personal, family]
