@@ -29,6 +29,7 @@ from pathlib import Path
 from . import core
 from .config import CLAUDE_MD, load_brain_cfg, load_persona
 from .providers.ollama import OllamaClient, OllamaDown
+from .sessions import SessionLog
 
 _MAX_HISTORY_TURNS = 24  # user+assistant pairs kept in the window
 
@@ -83,6 +84,7 @@ class LocalBrain:
         self._history: list[dict] = []
         self._persona = _persona()
         self._discipline = _discipline()
+        self._session = SessionLog()  # transcript -> vault/04 - Sessions/<date>.md
         self._stop = False
         self._perm_mode = "ask"
 
@@ -124,6 +126,7 @@ class LocalBrain:
             self._history.append({"role": "assistant", "content": reply})
             if len(self._history) > _MAX_HISTORY_TURNS * 2:
                 self._history = self._history[-_MAX_HISTORY_TURNS * 2:]
+            self._session.append(utterance, reply)
         # rough bookkeeping so "usage report" has something to say
         self.session["turns"] += 1
         self.session["out_tokens"] += max(1, len(reply) // 4)

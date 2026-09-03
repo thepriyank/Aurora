@@ -114,7 +114,7 @@ PTT / typed  → vendor/backtalk (STT, signal bus)
 ## CURRENT STATE
 
 - ✅ Phase 0 — fork & assemble: repo scaffolded, `vendor/backtalk` imported as a subtree, docs in `docs/`
-- 🟡 Phase 1 — local brain: `jarvis_brain` + first-run wizard done; `backtalk` patched (`main.py` import branch + `pyproject.toml` dep). Verified: wizard `check`, config load/save, Ollama provider (health/list/error), `core.run_turn` streams a real local-model reply. **Pending:** full `uv sync` of `vendor/backtalk` (pulls whisper/kokoro) + real PTT voice round-trip; multi-turn needs more free RAM than this box had during the test (1–3B model advised here).
+- 🟡 Phase 1 — local brain: `jarvis_brain` + first-run wizard done; `backtalk` patched (`main.py` import branch + `pyproject.toml` dep). Local model = `qwen2.5:3b-instruct` (`config/models.yaml`). Verified: wizard `check`, config load/save, Ollama provider (health/list/error), `core.run_turn` + `LocalBrain` stream real replies, **multi-turn memory holds on the 3B**, transcripts persist to `Vault/04 - Sessions/<date>.md` (`jarvis_brain/sessions.py`), `jarvis_brain/server.py` serves `GET /health` + `POST /turn` (SSE) for the future Android client, `brain: "claude"` switch untouched. **Pending:** full `uv sync` of `vendor/backtalk` (pulls whisper/kokoro) + real PTT voice round-trip on the box.
 - ⬜ Phase 2 — tools & vault memory
 - ⬜ Phase 3 — Google Drive memory sync
 - ⬜ Phase 4 — "big brain" escalation

@@ -3,6 +3,7 @@
     configure [--defaults]   first-run wizard: pick/pull the local model
     check                    exit 0 iff ready to run (used by start.ps1/.sh)
     chat                     a plain REPL against the local brain (no voice)
+    server [--host H --port P]  HTTP front: POST /turn (SSE), GET /health
 """
 from __future__ import annotations
 
@@ -75,6 +76,15 @@ def main(argv: list[str] | None = None) -> int:
         return check()
     if cmd == "chat":
         return _chat()
+    if cmd == "server":
+        from .server import serve
+        host, port = "127.0.0.1", 8765
+        for i, arg in enumerate(rest):
+            if arg == "--host" and i + 1 < len(rest):
+                host = rest[i + 1]
+            elif arg == "--port" and i + 1 < len(rest):
+                port = int(rest[i + 1])
+        return serve(host, port)
     print(__doc__)
     return 2
 
