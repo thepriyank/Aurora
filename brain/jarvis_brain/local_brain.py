@@ -26,7 +26,7 @@ import os
 from collections.abc import AsyncIterator
 from pathlib import Path
 
-from . import core, memory
+from . import core, escalation, memory
 from .config import CLAUDE_MD, load_brain_cfg, load_persona
 from .providers.ollama import OllamaClient, OllamaDown
 from .sessions import SessionLog
@@ -115,7 +115,30 @@ class LocalBrain:
     async def ask_stream(self, utterance: str) -> AsyncIterator[str]:
         self._stop = False
         reply_parts: list[str] = []
-        hint = memory.recall_hint(utterance, self._tools_cfg.roots["vault"])
+        vault = self._tools_cfg.roots["vault"]
+        asked, want_big = escalation.detect(utterance)
+        hint, tags = memory.recall_context(asked, vault)
+
+        # Phase 4: "use the big brain" routes THIS turn to a stronger model.
+        if want_big:
+            esc = escalation.Escalation(self._cfg)
+            async for sentence in esc.stream(
+                asked, self._history,
+                persona=self._persona, discipline=self._discipline,
+                touched_tags=tags,
+            ):
+                reply_parts.append(sentence)
+                yield sentence
+            if esc.answered_big:
+                reply = " ".join(reply_parts).strip()
+                self._history.append({"role": "user", "content": asked})
+                self._history.append({"role": "assistant", "content": reply})
+                self._session.append(utterance, reply)
+                self.session["turns"] += 1
+                return
+            # policy refusal or every provider failed — fall through to local
+            utterance = asked
+
         async for sentence in core.run_turn(
             utterance,
             self._history,

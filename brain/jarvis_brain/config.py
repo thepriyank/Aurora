@@ -49,6 +49,47 @@ def _expand(p: str | None) -> str:
 
 
 # --------------------------------------------------------------------------- #
+# .env — API keys live here (git-ignored), not in models.yaml
+# --------------------------------------------------------------------------- #
+ENV_FILE = REPO_ROOT / ".env"
+_ENV_CACHE: dict[str, str] | None = None
+
+
+def _parse_env_file() -> dict[str, str]:
+    out: dict[str, str] = {}
+    try:
+        for line in ENV_FILE.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            out[k.strip()] = v.strip().strip('"').strip("'")
+    except FileNotFoundError:
+        pass
+    return out
+
+
+def load_env_file() -> None:
+    """Merge repo `.env` into os.environ (real environment wins). Idempotent."""
+    global _ENV_CACHE
+    _ENV_CACHE = _parse_env_file()
+    for k, v in _ENV_CACHE.items():
+        os.environ.setdefault(k, v)
+
+
+def env_value(name: str) -> str:
+    """A secret by env-var name: real environment first, then repo `.env`."""
+    if not name:
+        return ""
+    if name in os.environ:
+        return os.environ[name]
+    global _ENV_CACHE
+    if _ENV_CACHE is None:
+        _ENV_CACHE = _parse_env_file()
+    return _ENV_CACHE.get(name, "")
+
+
+# --------------------------------------------------------------------------- #
 # vault + device — the one place these are resolved (Phase 3)
 # --------------------------------------------------------------------------- #
 def _slug(s: str) -> str:
@@ -110,9 +151,48 @@ class LocalModelCfg:
 
 @dataclass
 class BigProviderCfg:
-    provider: str
-    model: str
+    """One "big brain" option. Two kinds:
+
+    kind="cli" — shell out to a coding-agent CLI you're already signed into
+                 (`claude`, `codex`, `gemini`). No API key, cost is your
+                 existing subscription.
+    kind="api" — call a hosted API with a key from `api_key_env` (in .env):
+                 OpenRouter, OpenAI, Anthropic, Groq, or any OpenAI-compatible
+                 endpoint via `base_url`.
+    """
+    kind: str = "api"              # "cli" | "api"
+    cli: str = ""                  # kind=cli: claude | codex | gemini
+    provider: str = ""            # kind=api: openrouter | openai | anthropic | groq | ...
+    model: str = ""
     api_key_env: str = ""
+    base_url: str = ""
+
+    @property
+    def label(self) -> str:
+        if self.kind == "cli":
+            return f"{self.cli} (subscription CLI)"
+        return f"{self.provider}:{self.model or '?'}"
+
+
+@dataclass
+class SpecializedProviderCfg:
+    """A key for non-chat work — image/video/music generation, OCR, embeddings,
+    anything. Keyed by a capability name you choose. The secret lives in .env
+    under `api_key_env`; only its name is stored here."""
+    capability: str
+    provider: str = ""
+    base_url: str = ""
+    api_key_env: str = ""
+    model: str = ""
+    notes: str = ""
+
+    @property
+    def key(self) -> str:
+        return env_value(self.api_key_env) if self.api_key_env else ""
+
+    @property
+    def configured(self) -> bool:
+        return bool(self.key)
 
 
 @dataclass
@@ -120,6 +200,7 @@ class BrainCfg:
     mode: str = "local"
     local: LocalModelCfg = field(default_factory=LocalModelCfg)
     big: list[BigProviderCfg] = field(default_factory=list)
+    specialized: dict[str, SpecializedProviderCfg] = field(default_factory=dict)
     monthly_cloud_cap_inr: int = 1000
     never_escalate_tags: list[str] = field(
         default_factory=lambda: ["private", "health", "finance_personal", "family"]
@@ -130,6 +211,13 @@ class BrainCfg:
     @property
     def is_configured(self) -> bool:
         return bool(self.local.model)
+
+    @property
+    def has_big(self) -> bool:
+        return bool(self.big)
+
+    def specialized_for(self, capability: str) -> SpecializedProviderCfg | None:
+        return self.specialized.get(capability)
 
 
 def load_brain_cfg(*, required: bool = True) -> BrainCfg:
@@ -162,19 +250,41 @@ def load_brain_cfg(*, required: bool = True) -> BrainCfg:
         temperature=float(lraw.get("temperature", 0.7)),
         languages=list(lraw.get("languages", ["en"])),
     )
-    big = [
-        BigProviderCfg(
-            provider=p.get("provider", ""),
-            model=p.get("model", ""),
-            api_key_env=p.get("api_key_env", ""),
+    big: list[BigProviderCfg] = []
+    for p in (b.get("big") or []):
+        if not isinstance(p, dict):
+            continue
+        kind = str(p.get("kind", "") or ("cli" if p.get("cli") else "api")).lower()
+        if kind == "cli" and p.get("cli"):
+            big.append(BigProviderCfg(kind="cli", cli=str(p["cli"]),
+                                      model=str(p.get("model", ""))))
+        elif kind == "api" and p.get("provider"):
+            big.append(BigProviderCfg(
+                kind="api",
+                provider=str(p["provider"]),
+                model=str(p.get("model", "")),
+                api_key_env=str(p.get("api_key_env", "")),
+                base_url=str(p.get("base_url", "")),
+            ))
+
+    specialized: dict[str, SpecializedProviderCfg] = {}
+    for cap, s in (raw.get("specialized") or {}).items():
+        if not isinstance(s, dict):
+            continue
+        specialized[str(cap)] = SpecializedProviderCfg(
+            capability=str(cap),
+            provider=str(s.get("provider", "")),
+            base_url=str(s.get("base_url", "")),
+            api_key_env=str(s.get("api_key_env", "")),
+            model=str(s.get("model", "")),
+            notes=str(s.get("notes", "")),
         )
-        for p in (b.get("big") or [])
-        if isinstance(p, dict) and p.get("provider") and p.get("model")
-    ]
+
     cfg = BrainCfg(
         mode=b.get("mode", "local"),
         local=local,
         big=big,
+        specialized=specialized,
         monthly_cloud_cap_inr=int(b.get("monthly_cloud_cap_inr", 1000)),
         never_escalate_tags=list(
             b.get("never_escalate_tags",
@@ -187,7 +297,22 @@ def load_brain_cfg(*, required: bool = True) -> BrainCfg:
             f"{MODELS_YAML} has no brain.local.model set. "
             f"Run:  python -m jarvis_brain configure"
         )
+    load_env_file()  # make API keys from .env visible to the providers
     return cfg
+
+
+def _big_to_dict(p: BigProviderCfg) -> dict:
+    if p.kind == "cli":
+        d = {"kind": "cli", "cli": p.cli}
+        if p.model:
+            d["model"] = p.model
+        return d
+    d = {"kind": "api", "provider": p.provider, "model": p.model}
+    if p.api_key_env:
+        d["api_key_env"] = p.api_key_env
+    if p.base_url:
+        d["base_url"] = p.base_url
+    return d
 
 
 def save_brain_cfg(cfg: BrainCfg) -> None:
@@ -204,13 +329,21 @@ def save_brain_cfg(cfg: BrainCfg) -> None:
             "temperature": cfg.local.temperature,
             "languages": cfg.local.languages,
         },
-        "big": [
-            {"provider": p.provider, "model": p.model, "api_key_env": p.api_key_env}
-            for p in cfg.big
-        ],
+        "big": [_big_to_dict(p) for p in cfg.big],
         "monthly_cloud_cap_inr": cfg.monthly_cloud_cap_inr,
         "never_escalate_tags": cfg.never_escalate_tags,
     }
+    if cfg.specialized:
+        raw["specialized"] = {
+            cap: {k: v for k, v in {
+                "provider": s.provider,
+                "base_url": s.base_url,
+                "api_key_env": s.api_key_env,
+                "model": s.model,
+                "notes": s.notes,
+            }.items() if v}
+            for cap, s in cfg.specialized.items()
+        }
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     header = (
         "# config/models.yaml — the brain registry. Written by "

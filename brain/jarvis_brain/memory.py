@@ -53,37 +53,55 @@ _STOP = {
 }
 
 
-def recall_hint(user_text: str, vault: Path, *, max_lines: int = 6) -> str:
-    """Cheap pre-turn retrieval: grep the vault's markdown for lines matching
-    words in the user's message. Returns a short block to prepend to the system
-    prompt, or "" if nothing looks relevant. Never raises."""
+_SENS_TAGS = ("private", "health", "finance_personal", "family")
+_SENS_RE = re.compile(r"sensitivity:\s*([a-z_]+)", re.IGNORECASE)
+
+
+def recall_context(
+    user_text: str, vault: Path, *, max_lines: int = 6
+) -> tuple[str, set[str]]:
+    """Cheap pre-turn retrieval. Returns (hint_block, sensitivity_tags) where
+    the tags are any never-escalate markers on the matched notes/lines (so the
+    escalation policy can keep a private turn local). Never raises."""
+    hits: list[str] = []
+    tags: set[str] = set()
     try:
         words = {
             w.lower() for w in re.findall(r"[A-Za-z0-9]{4,}", user_text)
         } - _STOP
         if not words or not vault.is_dir():
-            return ""
+            return "", tags
         rx = re.compile("|".join(re.escape(w) for w in words), re.IGNORECASE)
-        hits: list[str] = []
         for md in vault.rglob("*.md"):
             if len(hits) >= max_lines:
                 break
             if any(seg in {".git", ".obsidian", ".trash"} for seg in md.parts):
                 continue
+            stem_tag = md.stem.lower()
             try:
-                for line in md.read_text(encoding="utf-8").splitlines():
-                    s = line.lstrip("-*# ").split("<!--")[0].strip()
-                    if len(s) > 3 and rx.search(s):
-                        hits.append(f"- {s}  ({md.stem})")
-                        if len(hits) >= max_lines:
-                            break
+                text = md.read_text(encoding="utf-8")
             except (UnicodeDecodeError, OSError):
                 continue
+            file_tags = {t for t in _SENS_TAGS if t in stem_tag or f"#{t}" in text}
+            for line in text.splitlines():
+                raw = line.strip()
+                s = raw.lstrip("-*# ").split("<!--")[0].strip()
+                if len(s) > 3 and rx.search(s):
+                    hits.append(f"- {s}  ({md.stem})")
+                    tags |= file_tags
+                    m = _SENS_RE.search(raw)
+                    if m and m.group(1).lower() in _SENS_TAGS:
+                        tags.add(m.group(1).lower())
+                    if len(hits) >= max_lines:
+                        break
     except Exception:  # noqa: BLE001 - retrieval is best-effort
-        return ""
-    if not hits:
-        return ""
-    return "Notes that may be relevant to this turn:\n" + "\n".join(hits)
+        return "", set()
+    hint = ("Notes that may be relevant to this turn:\n" + "\n".join(hits)) if hits else ""
+    return hint, tags
+
+
+def recall_hint(user_text: str, vault: Path, *, max_lines: int = 6) -> str:
+    return recall_context(user_text, vault, max_lines=max_lines)[0]
 
 
 def _daily_note(vault: Path) -> Path:

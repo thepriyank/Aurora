@@ -1,9 +1,10 @@
 """`python -m jarvis_brain <cmd>`
 
-    configure [--defaults]   first-run wizard: pick/pull the local model
+    configure [--defaults]   first-run wizard: vault, local model, big brain
     check                    exit 0 iff ready to run (used by start.ps1/.sh)
-    chat                     a plain REPL against the local brain (no voice)
+    chat                     a plain REPL against the brain (no voice)
     server [--host H --port P]  HTTP front: POST /turn (SSE), GET /health
+    keys                     add / list big-brain + specialized API providers
 """
 from __future__ import annotations
 
@@ -21,7 +22,7 @@ def _chat() -> int:
         except (AttributeError, ValueError):
             pass
 
-    from . import core, memory
+    from . import core, escalation, memory
     from .config import ConfigError, load_brain_cfg, load_persona
     from .tools import Dispatcher, load_tools_config, ollama_schemas
 
@@ -55,12 +56,27 @@ def _chat() -> int:
     print(f"chat with the local brain ({cfg.local.model}), {len(schemas)} tools. "
           f"Ctrl-C or 'exit' to quit.\n")
 
+    disc = "Spoken style: short sentences, no markdown."
+
     async def turn(text: str) -> None:
         reply: list[str] = []
-        hint = memory.recall_hint(text, tools_cfg.roots["vault"])
+        asked, want_big = escalation.detect(text)
+        hint, tags = memory.recall_context(asked, tools_cfg.roots["vault"])
+
+        if want_big:
+            esc = escalation.Escalation(cfg)
+            async for sentence in esc.stream(asked, history, persona=persona,
+                                             discipline=disc, touched_tags=tags):
+                print(f"  {sentence}", flush=True)
+                reply.append(sentence)
+            if esc.answered_big:
+                history.append({"role": "user", "content": asked})
+                history.append({"role": "assistant", "content": " ".join(reply).strip()})
+                return
+            text = asked  # refused / all providers failed -> local answers
+
         async for sentence in core.run_turn(
-            text, history, brain_cfg=cfg, persona=persona,
-            discipline="Spoken style: short sentences, no markdown.",
+            text, history, brain_cfg=cfg, persona=persona, discipline=disc,
             tools=schemas, dispatch=dispatch, extra_context=hint,
         ):
             print(f"  {sentence}", flush=True)
@@ -104,6 +120,9 @@ def main(argv: list[str] | None = None) -> int:
         return check()
     if cmd == "chat":
         return _chat()
+    if cmd == "keys":
+        from .configure import run_keys
+        return run_keys()
     if cmd == "server":
         from .server import serve
         host, port = "127.0.0.1", 8765

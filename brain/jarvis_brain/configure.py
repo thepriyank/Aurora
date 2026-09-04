@@ -28,6 +28,7 @@ from .config import (
     ConfigError,
     LocalModelCfg,
     MODELS_YAML,
+    SpecializedProviderCfg,
     device_name,
     load_brain_cfg,
     load_jarvis_json,
@@ -50,8 +51,18 @@ DEFAULT_MODEL = "qwen3:8b"
 # --------------------------------------------------------------------------- #
 # small helpers
 # --------------------------------------------------------------------------- #
+for _stream in (sys.stdout, sys.stderr):
+    try:  # Windows consoles / piped output default to a legacy codepage
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
+
+
 def _p(msg: str = "") -> None:
-    print(msg, flush=True)
+    try:
+        print(msg, flush=True)
+    except UnicodeEncodeError:
+        print(msg.encode("ascii", "replace").decode("ascii"), flush=True)
 
 
 def _run(coro):
@@ -263,30 +274,151 @@ def _pull_if_needed(client: OllamaClient, model: str) -> None:
     _p(f"✓ pulled {model}")
 
 
-def _configure_big_brain(current: list[BigProviderCfg]) -> list[BigProviderCfg]:
-    _p()
-    _p('"Big brain" — the cloud model used ONLY when you say "use the big brain"')
-    _p("──────────────────────────────────────────────────────────────────────")
-    _p("  s) skip — stay fully local (you can add this later)")
-    _p("  o) OpenRouter  (free/cheap open-weight models)")
-    _p("  a) Anthropic   (Claude — paid)")
-    pick = _ask("Choose", default="s").lower()[:1]
+_API_PRESETS = {
+    "o": ("openrouter", "OPENROUTER_API_KEY", "deepseek/deepseek-chat", ""),
+    "a": ("anthropic", "ANTHROPIC_API_KEY", "claude-sonnet-5", ""),
+    "x": ("openai", "OPENAI_API_KEY", "gpt-4o", ""),
+    "g": ("groq", "GROQ_API_KEY", "llama-3.3-70b-versatile", ""),
+}
+_SPECIAL_PRESETS = {
+    "kie.ai": ("https://api.kie.ai", "KIE_API_KEY"),
+    "higgsfield": ("https://platform.higgsfield.ai/api", "HIGGSFIELD_API_KEY"),
+    "fal": ("https://fal.run", "FAL_KEY"),
+    "replicate": ("https://api.replicate.com/v1", "REPLICATE_API_TOKEN"),
+    "elevenlabs": ("https://api.elevenlabs.io/v1", "ELEVENLABS_API_KEY"),
+    "openai": ("https://api.openai.com/v1", "OPENAI_API_KEY"),
+}
 
-    if pick == "o":
-        key = getpass("  OpenRouter API key (hidden, blank to skip): ").strip()
+
+def _describe_big(b: BigProviderCfg) -> str:
+    return b.label
+
+
+def _ask_api_provider() -> BigProviderCfg:
+    _p("    o) OpenRouter   a) Anthropic   x) OpenAI   g) Groq   c) other (OpenAI-compatible)")
+    p = _ask("  which API", default="o").lower()[:1]
+    if p == "c":
+        provider = _ask("  provider label", default="custom") or "custom"
+        env = _ask("  env var name for the key", default=f"{provider.upper()}_API_KEY")
+        base = _ask("  base_url (ends in /v1)", default="")
+        model = _ask("  model id", default="")
+    else:
+        provider, env, model_default, base = _API_PRESETS.get(p, _API_PRESETS["o"])
+        model = _ask("  model id", default=model_default)
+    key = getpass(f"  {env} (hidden, Enter to set later in .env): ").strip()
+    if key:
+        _write_env_var(env, key)
+    if provider == "anthropic":
+        _p("  ⚠  also set a hard spend limit in the Anthropic billing console.")
+    return BigProviderCfg(kind="api", provider=provider, model=model,
+                          api_key_env=env, base_url=base)
+
+
+def _configure_big_brain(current: list[BigProviderCfg]) -> list[BigProviderCfg]:
+    from .providers.cli_bridge import which_supported
+
+    _p()
+    _p('"Big brain" — a stronger model for the occasional hard turn')
+    _p('(used ONLY when you say "use the big brain")')
+    _p("──────────────────────────────────────────────────────────")
+    found = which_supported()
+    opts: list[tuple[str, str]] = []
+    if found:
+        _p("Subscriptions detected on this machine (no API key needed):")
+        for c in found:
+            opts.append(("cli", c))
+            _p(f"  {len(opts)}) {c}   — your existing {c} plan")
+    else:
+        _p("(no claude / codex / gemini CLI found on PATH)")
+    opts.append(("api", ""))
+    _p(f"  {len(opts)}) API key  (OpenRouter / OpenAI / Anthropic / Groq / other)")
+    _p("  s) skip — stay fully local")
+    if current:
+        _p(f"  Enter) keep current: {', '.join(_describe_big(b) for b in current)}")
+
+    pick = _ask("Choose (comma-separate for fallbacks, e.g. 1,3)", default="")
+    if pick == "" and current:
+        return current
+    if pick.strip().lower() in ("s", "skip"):
+        _p("  skipped — escalation is off.")
+        return []
+
+    chosen: list[BigProviderCfg] = []
+    for tok in pick.split(","):
+        tok = tok.strip()
+        if not tok.isdigit():
+            continue
+        n = int(tok)
+        if 1 <= n <= len(opts):
+            kind, cli = opts[n - 1]
+            if kind == "cli":
+                model = _ask(f"  {cli} model id (Enter = its default)", default="")
+                chosen.append(BigProviderCfg(kind="cli", cli=cli, model=model))
+            else:
+                chosen.append(_ask_api_provider())
+    if not chosen:
+        _p("  nothing valid picked — leaving escalation off.")
+    return chosen
+
+
+def _configure_specialized(
+    current: dict[str, SpecializedProviderCfg]
+) -> dict[str, SpecializedProviderCfg]:
+    out = dict(current)
+    _p()
+    _p("Specialized providers — keys for image / video / audio generation and")
+    _p("any other non-chat task. Add as many as you want; Enter to finish.")
+    _p("──────────────────────────────────────────────────────────────────")
+    if out:
+        for cap, s in out.items():
+            state = "key set" if s.configured else f"key MISSING ({s.api_key_env})"
+            _p(f"  have: {cap} -> {s.provider}  [{state}]")
+    while True:
+        cap = _ask("Capability (e.g. image, video, music, ocr) — Enter to finish",
+                   default="")
+        if not cap:
+            break
+        _p(f"  known providers: {', '.join(_SPECIAL_PRESETS)}  (or type your own)")
+        prov = _ask("  provider", default="kie.ai")
+        base_d, env_d = _SPECIAL_PRESETS.get(prov, ("", f"{cap.upper()}_API_KEY"))
+        base = _ask("  base_url", default=base_d)
+        env = _ask("  env var name for the key", default=env_d)
+        model = _ask("  default model / endpoint (optional)", default="")
+        key = getpass(f"  {env} (hidden, Enter to set later in .env): ").strip()
         if key:
-            _write_env_var("OPENROUTER_API_KEY", key)
-        model = _ask("  OpenRouter model id", default="deepseek/deepseek-chat")
-        return [BigProviderCfg("openrouter", model, "OPENROUTER_API_KEY")]
-    if pick == "a":
-        key = getpass("  Anthropic API key (hidden, blank to skip): ").strip()
-        if key:
-            _write_env_var("ANTHROPIC_API_KEY", key)
-        model = _ask("  Anthropic model id", default="claude-sonnet-5")
-        _p("  ⚠  set a hard spend limit in the Anthropic billing console too.")
-        return [BigProviderCfg("anthropic", model, "ANTHROPIC_API_KEY")]
-    _p("  skipped — cloud escalation is off.")
-    return []
+            _write_env_var(env, key)
+        out[cap] = SpecializedProviderCfg(
+            capability=cap, provider=prov, base_url=base,
+            api_key_env=env, model=model,
+        )
+        _p(f"  ✓ {cap} -> {prov}")
+    return out
+
+
+def run_keys() -> int:
+    """`python -m jarvis_brain keys` — manage big-brain + specialized providers
+    without the full wizard."""
+    if not sys.stdin.isatty():
+        _p("✗ `keys` needs an interactive terminal.")
+        _p("  Run it in a real shell:  python -m jarvis_brain keys")
+        return 2
+    try:
+        cfg = load_brain_cfg(required=False)
+    except ConfigError:
+        cfg = BrainCfg()
+    _p("Current big-brain providers:")
+    for b in cfg.big:
+        _p(f"  - {_describe_big(b)}")
+    if not cfg.big:
+        _p("  (none)")
+    picked = _configure_big_brain(cfg.big)
+    if picked:
+        cfg.big = picked
+    cfg.specialized = _configure_specialized(cfg.specialized)
+    save_brain_cfg(cfg)
+    _p()
+    _p(f"✓ wrote {MODELS_YAML.name}  (secrets went to .env)")
+    return 0
 
 
 def _smoke_test(cfg: BrainCfg) -> None:
@@ -326,8 +458,10 @@ def run_wizard(*, use_defaults: bool = False) -> int:
         existing = BrainCfg()
 
     if existing.is_configured and not use_defaults:
-        _p(f"Already configured: local model = {existing.local.model}, "
-           f"cloud = {'on' if existing.big else 'off'}")
+        big_s = ", ".join(_describe_big(b) for b in existing.big) or "off"
+        spec_s = ", ".join(existing.specialized) or "none"
+        _p(f"Already configured: local = {existing.local.model} | "
+           f"big brain = {big_s} | specialized = {spec_s}")
         if _ask("Reconfigure?", default="n").lower()[:1] != "y":
             _p("Keeping the current config.")
             return 0
@@ -366,13 +500,16 @@ def run_wizard(*, use_defaults: bool = False) -> int:
     if use_defaults:
         model = existing.local.model or DEFAULT_MODEL
         big = existing.big
+        specialized = existing.specialized
         cap = existing.monthly_cloud_cap_inr
     else:
         model = _choose_local_model(client) or DEFAULT_MODEL
         _pull_if_needed(client, model)
         big = _configure_big_brain(existing.big)
-        cap = int(_ask("Monthly cloud budget cap (INR)",
+        cap = int(_ask("Monthly cloud budget cap in INR (API calls only; "
+                       "subscriptions don't count)",
                        default=str(existing.monthly_cloud_cap_inr)) or 1000)
+        specialized = _configure_specialized(existing.specialized)
 
     if use_defaults:
         _pull_if_needed(client, model)
@@ -389,6 +526,7 @@ def run_wizard(*, use_defaults: bool = False) -> int:
             languages=existing.local.languages or ["en", "hi"],
         ),
         big=big,
+        specialized=specialized,
         monthly_cloud_cap_inr=cap,
         never_escalate_tags=existing.never_escalate_tags,
         _raw=existing._raw,
@@ -425,6 +563,11 @@ def check() -> int:
     vtag = str(v) if load_jarvis_json().get("vault_path") else f"{v} (repo-local, not synced)"
     _p(f"ready: {cfg.local.model} @ {cfg.local.base_url}")
     _p(f"vault: {vtag}")
+    if cfg.big:
+        _p("big brain: " + ", ".join(_describe_big(b) for b in cfg.big))
+    for cap, s in cfg.specialized.items():
+        state = "ok" if s.configured else f"MISSING key ({s.api_key_env})"
+        _p(f"specialized[{cap}]: {s.provider} — {state}")
     return 0
 
 
