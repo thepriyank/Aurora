@@ -391,27 +391,32 @@ def _bare_persona() -> str:
     )
 
 
+def persona_from_text(text: str) -> str | None:
+    """Pull the <!-- PERSONA:START -->…<!-- PERSONA:END --> block out of a
+    CLAUDE.md and substitute {name}. None if the markers aren't both present —
+    the WHOLE file is a dev/architecture doc and feeding all of it to a small
+    local model makes it answer *about* the file."""
+    if not text or _PERSONA_START not in text or _PERSONA_END not in text:
+        return None
+    block = text.split(_PERSONA_START, 1)[1].split(_PERSONA_END, 1)[0].strip()
+    if not block:
+        return None
+    name = load_jarvis_json().get("name", "Assistant")
+    return block.replace("{name}", name)
+
+
 def load_persona() -> str:
     """The agent's spoken identity.
 
     Precedence:
-      1. the block between <!-- PERSONA:START --> / <!-- PERSONA:END --> in CLAUDE.md
+      1. the PERSONA block in CLAUDE.md
       2. a `persona` string in config/jarvis.json
       3. a bare generated line
 
-    The WHOLE CLAUDE.md is a dev/architecture document — feeding all of it to a
-    small local model makes it answer *about* the file. The marked block is the
-    part that actually is the character. (Phase 3 folds in the vault's
-    VAULT-INDEX.md here too.)
+    (Phase 3 folds in the vault's VAULT-INDEX.md here too.)
     """
     try:
         text = CLAUDE_MD.read_text(encoding="utf-8")
     except FileNotFoundError:
         return _bare_persona()
-
-    if _PERSONA_START in text and _PERSONA_END in text:
-        block = text.split(_PERSONA_START, 1)[1].split(_PERSONA_END, 1)[0].strip()
-        if block:
-            name = load_jarvis_json().get("name", "Assistant")
-            return block.replace("{name}", name)
-    return _bare_persona()
+    return persona_from_text(text) or _bare_persona()

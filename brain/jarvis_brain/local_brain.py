@@ -27,7 +27,7 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 
 from . import core, escalation, memory
-from .config import CLAUDE_MD, load_brain_cfg, load_persona
+from .config import load_brain_cfg, load_persona, persona_from_text
 from .providers.ollama import OllamaClient, OllamaDown
 from .sessions import SessionLog
 from .tools import Dispatcher, load_tools_config, ollama_schemas
@@ -36,19 +36,21 @@ _MAX_HISTORY_TURNS = 24  # user+assistant pairs kept in the window
 
 
 def _persona() -> str:
-    """Prefer backtalk's configured agent_dir/CLAUDE.md; fall back to the
-    repo CLAUDE.md; then to a bare identity line."""
+    """The spoken character only — the PERSONA block, never the whole
+    architecture doc (a 3B model fed the full CLAUDE.md answers *about* it).
+    Prefer backtalk's configured agent_dir/CLAUDE.md, then the repo CLAUDE.md,
+    then a bare identity line."""
     try:
         from backtalk.config import CFG as _BT
         agent_dir = _BT.get("agent_dir")
         if agent_dir:
             p = Path(os.path.expanduser(agent_dir)) / "CLAUDE.md"
             if p.is_file():
-                return p.read_text(encoding="utf-8").strip()
+                block = persona_from_text(p.read_text(encoding="utf-8"))
+                if block:
+                    return block
     except Exception:
         pass
-    if CLAUDE_MD.is_file():
-        return CLAUDE_MD.read_text(encoding="utf-8").strip()
     return load_persona()
 
 
