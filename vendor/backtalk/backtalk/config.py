@@ -42,6 +42,9 @@ DEFAULTS = {
     # Display name, used in logs and to build the quit phrases
     # ("goodbye <name>" hangs up). Match your agent's actual name.
     "name": "Assistant",
+    # jarvis fork: other names/nicknames it answers to. Each one also gets
+    # its own quit phrases ("goodbye <alias>", "hang up <alias>", ...).
+    "aliases": [],
     # The brain. Full model id ON PURPOSE — never a bare alias like
     # "sonnet": the SDK resolves aliases through its own bundled CLI and
     # can silently land on an older model. The fast tier is most of the
@@ -125,12 +128,12 @@ DEFAULTS = {
     # default; "low" / "medium" / "high" / "max" applies at launch.
     # Saying "set effort to X" in a voice session saves itself here.
     "effort": "",
-    # The voice (Kokoro, local, free). bm_lewis is the proven default —
-    # British male, the butler register. Others: bm_george, bm_daniel,
-    # bm_fable, am_michael, af_heart... The first letter picks the
-    # language pipeline (a=American, b=British, e/f/h/i/j/p/z = other
-    # languages), so keep voice and accent matched.
-    "voice": "bm_lewis",
+    # The voice (Kokoro, local, free). bf_emma — British female. Others:
+    # bf_isabella, af_heart, af_bella, bm_lewis, bm_george... The first
+    # letter picks the language pipeline (a=American, b=British,
+    # e/f/h/i/j/p/z = other languages), the second is the gender, so keep
+    # voice and accent matched.
+    "voice": "bf_emma",
     # Speech recognition (faster-whisper, local, free).
     # Models: tiny.en / base.en / small.en / medium.en — small.en is the
     # accuracy/speed sweet spot on a normal machine.
@@ -152,7 +155,7 @@ DEFAULTS = {
     # without this it does unreliable per-utterance language-ID on short clips).
     "stt_language": "en",
     "tts_engine": "",
-    "piper_voice": "en_GB-alan-medium",
+    "piper_voice": "en_GB-jenny_dioco-medium",  # British female
     "espeak_exe": "",   # path to espeak-ng; "" = find on PATH / default install
     # The microphone to record from, matched by NAME. "" means whatever
     # the OS calls the default input, which is right on most machines.
@@ -286,10 +289,15 @@ def load() -> dict:
         thinking = str(REPO / thinking)
     cfg["thinking_sound"] = thinking
     name = str(cfg.get("name") or "Assistant")
-    low = name.lower()
-    cfg["quit_phrases"] = tuple(cfg.get("quit_phrases") or (
-        f"goodbye {low}", f"good bye {low}", "end voice mode",
-        f"hang up {low}", "hang up"))
+    names = [name] + [str(a) for a in (cfg.get("aliases") or []) if str(a).strip()]
+    if cfg.get("quit_phrases"):
+        cfg["quit_phrases"] = tuple(cfg["quit_phrases"])
+    else:
+        phrases = ["end voice mode", "hang up"]
+        for n in names:
+            low = n.lower()
+            phrases += [f"goodbye {low}", f"good bye {low}", f"hang up {low}"]
+        cfg["quit_phrases"] = tuple(phrases)
     key_label = "the " + str(cfg.get("ptt_key", "home")).replace("_", " ") \
                 + " key"
     # In hands-free there is no key to hold, so a separate line can be set.
