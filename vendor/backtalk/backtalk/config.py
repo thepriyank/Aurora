@@ -141,7 +141,12 @@ DEFAULTS = {
     # --- jarvis fork: STT/TTS engine selection. "" auto-detects: onnx-asr +
     #     piper on platforms with no ctranslate2/torch wheel (Windows/ARM64),
     #     else faster-whisper + kokoro. Force with "onnx-asr"/"faster-whisper"
-    #     and "piper"/"kokoro". onnx-asr only ships Whisper "whisper-base".
+    #     and "piper"/"kokoro". On the onnx-asr path, `stt_model` defaults to
+    #     NVIDIA's "nemo-parakeet-tdt-0.6b-v2" (English-only, far more
+    #     accurate on real speech than "whisper-base" at similar CPU speed —
+    #     ~2.4GB RAM instead of ~150MB; set stt_model: "whisper-base" to trade
+    #     back down). Any other onnx-asr model id (see onnx_asr.load_model)
+    #     also works, e.g. "nemo-parakeet-ctc-0.6b".
     "stt_engine": "",
     # Forced recognition language for the onnx-asr path (it's multilingual;
     # without this it does unreliable per-utterance language-ID on short clips).

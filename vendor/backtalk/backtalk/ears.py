@@ -64,6 +64,7 @@ _NONSPEECH = re.compile(r"[\[(][^\])]*[\])]")
 _model = None
 _model_lock = threading.Lock()
 _backend = None          # "mlx" once the GPU path loads, else "faster-whisper"
+_onnx_model_id = None    # jarvis fork: which onnx-asr model is loaded
 
 
 def _apple_gpu_available() -> bool:
@@ -310,24 +311,30 @@ def warm():
     """Load the STT model (first call downloads it to the HF cache).
     Called at startup while the greeting plays, so the first real
     utterance doesn't pay the load."""
-    global _model, _backend
+    global _model, _backend, _onnx_model_id
     check_microphone()
     with _model_lock:
         if _model is None:
             if _want_onnx_asr():
                 # jarvis fork: onnxruntime STT for platforms without a
-                # ctranslate2 wheel (Windows/ARM64). onnx-asr only ships
-                # `whisper-base` among Whisper sizes.
+                # ctranslate2 wheel (Windows/ARM64). Default to Parakeet
+                # TDT 0.6B: NVIDIA's, English-only, and markedly more
+                # accurate on real speech than the small multilingual
+                # whisper-base onnx-asr also ships — at roughly the same
+                # CPU latency on this hardware. ~2.4GB RAM instead of
+                # ~150MB; set stt_model to "whisper-base" to trade back
+                # down if that's tight.
                 import os as _os
                 _os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS", "1")
                 import onnx_asr
                 name = CFG["stt_model"]
                 if name not in _ONNX_ASR_IDS:
-                    name = "whisper-base"
+                    name = "nemo-parakeet-tdt-0.6b-v2"
                 log(f"[ears] loading {name} (onnx-asr / onnxruntime, CPU)...")
                 _model = onnx_asr.load_model(name)
                 _model.recognize(np.zeros(RATE // 5, dtype=np.float32))  # warm
                 _backend = "onnx-asr"
+                _onnx_model_id = name
             elif _apple_gpu_available():
                 import mlx_whisper
                 repo = _mlx_repo(CFG["stt_model"])
@@ -382,12 +389,16 @@ def transcribe(pcm: np.ndarray) -> str:
     audio = pcm.astype(np.float32) / 32768.0
     lang = "en" if CFG["stt_model"].endswith(".en") else None
     if _backend == "onnx-asr":
-        # onnx-asr's whisper-base is multilingual; without a forced language
-        # it runs per-utterance language-ID, which misfires constantly on
-        # short PTT clips (garbled/wrong-language transcripts). Force one.
-        onnx_lang = str(CFG.get("stt_language") or "en")
-        text = (model.recognize(audio, sample_rate=RATE, language=onnx_lang)
-                or "").strip()
+        if str(_onnx_model_id or "").startswith("whisper"):
+            # whisper-base is multilingual; without a forced language it runs
+            # per-utterance language-ID, which misfires on short PTT clips
+            # (garbled/wrong-language transcripts). Force one. Parakeet is
+            # English-only and takes no language kwarg at all.
+            onnx_lang = str(CFG.get("stt_language") or "en")
+            text = (model.recognize(audio, sample_rate=RATE, language=onnx_lang)
+                    or "").strip()
+        else:
+            text = (model.recognize(audio, sample_rate=RATE) or "").strip()
     elif _backend == "mlx":
         import mlx_whisper
         text = mlx_whisper.transcribe(audio, path_or_hf_repo=model,
