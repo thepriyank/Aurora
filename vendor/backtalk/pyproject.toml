@@ -35,6 +35,10 @@ packages = ["backtalk"]
 
 [tool.uv]
 package = false
+# --- jarvis fork: on Windows/ARM64, uv's managed CPython is x86-64 and runs
+#     under emulation (~10x slower for torch/whisper/kokoro). Prefer a native
+#     system Python so the voice line runs at ARM speed. ---
+python-preference = "system"
 
 # --- jarvis fork: resolve jarvis-brain from the sibling brain/ package ---
 [tool.uv.sources]
