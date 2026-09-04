@@ -382,7 +382,12 @@ def transcribe(pcm: np.ndarray) -> str:
     audio = pcm.astype(np.float32) / 32768.0
     lang = "en" if CFG["stt_model"].endswith(".en") else None
     if _backend == "onnx-asr":
-        text = (model.recognize(audio, sample_rate=RATE) or "").strip()
+        # onnx-asr's whisper-base is multilingual; without a forced language
+        # it runs per-utterance language-ID, which misfires constantly on
+        # short PTT clips (garbled/wrong-language transcripts). Force one.
+        onnx_lang = str(CFG.get("stt_language") or "en")
+        text = (model.recognize(audio, sample_rate=RATE, language=onnx_lang)
+                or "").strip()
     elif _backend == "mlx":
         import mlx_whisper
         text = mlx_whisper.transcribe(audio, path_or_hf_repo=model,

@@ -143,6 +143,9 @@ DEFAULTS = {
     #     else faster-whisper + kokoro. Force with "onnx-asr"/"faster-whisper"
     #     and "piper"/"kokoro". onnx-asr only ships Whisper "whisper-base".
     "stt_engine": "",
+    # Forced recognition language for the onnx-asr path (it's multilingual;
+    # without this it does unreliable per-utterance language-ID on short clips).
+    "stt_language": "en",
     "tts_engine": "",
     "piper_voice": "en_GB-alan-medium",
     "espeak_exe": "",   # path to espeak-ng; "" = find on PATH / default install
