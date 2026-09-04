@@ -60,6 +60,32 @@ _SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
 _pipe = None
 _pipe_lock = threading.Lock()
 
+# jarvis fork: TTS backend — "kokoro" (default) or "piper" (onnxruntime, for
+# platforms with no torch wheel, e.g. Windows/ARM64). Set by warm().
+_tts_backend = None
+_piper_rate = KOKORO_RATE
+
+
+def _want_piper() -> bool:
+    engine = str(CFG.get("tts_engine", "") or "").lower()
+    if engine == "piper":
+        return True
+    if engine == "kokoro":
+        return False
+    try:
+        import kokoro  # noqa: F401
+        return False
+    except ImportError:
+        return True
+
+
+def _espeak_exe() -> str:
+    override = str(CFG.get("espeak_exe", "") or "")
+    if override and os.path.exists(override):
+        return override
+    return shutil.which("espeak-ng") or shutil.which("espeak") or (
+        r"C:\Program Files\eSpeak NG\espeak-ng.exe")
+
 
 def _ensure_espeak():
     """kokoro phonemizes through system espeak-ng (its bundled loader
@@ -154,25 +180,52 @@ def _sweep_orphan_espeak_tempdirs():
         log(f"[mouth] swept {swept} orphaned espeak temp dir(s)")
 
 
+def _warm_piper():
+    """jarvis fork: load a Piper voice (onnxruntime). Downloads the voice
+    files on first run. Phonemization goes through the system espeak-ng."""
+    global _pipe, _tts_backend, _piper_rate
+    from pathlib import Path
+
+    from piper import PiperVoice
+    from piper.download_voices import download_voice
+
+    name = str(CFG.get("piper_voice") or "en_GB-alan-medium")
+    d = Path(os.path.expanduser("~")) / ".cache" / "jarvis-piper"
+    d.mkdir(parents=True, exist_ok=True)
+    if not (d / f"{name}.onnx").exists():
+        log(f"[mouth] downloading piper voice {name}...")
+        download_voice(name, d)
+    log(f"[mouth] loading piper voice {name}...")
+    _pipe = PiperVoice.load(str(d / f"{name}.onnx"), str(d / f"{name}.onnx.json"))
+    _piper_rate = int(_pipe.config.sample_rate)
+    _tts_backend = "piper"
+    log(f"[mouth] voice ready (piper, {_piper_rate}Hz)")
+
+
 def warm():
-    """Load the Kokoro pipeline (first call downloads the model to the
-    HF cache). Called at startup while the greeting text is composed."""
-    global _pipe
+    """Load the TTS voice (first call downloads the model). Called at startup
+    while the greeting text is composed."""
+    global _pipe, _tts_backend
     with _pipe_lock:
-        if _pipe is None:
-            _ensure_espeak()
-            # Before kokoro makes this run's scratch dirs, clear the ones
-            # earlier runs could not clean up on their way out.
-            _sweep_orphan_espeak_tempdirs()
-            from kokoro import KPipeline
-            # The voice name's first letter IS the language pipeline:
-            # a=American English, b=British English, e/f/h/i/j/p/z = the
-            # other shipped languages. bm_lewis -> 'b'.
-            lang = (CFG["voice"] or "bm_lewis")[0]
-            log(f"[mouth] loading kokoro (lang '{lang}', "
-                f"voice {CFG['voice']})...")
-            _pipe = KPipeline(lang_code=lang)
-            log("[mouth] voice ready")
+        if _pipe is not None:
+            return _pipe
+        if _want_piper():
+            _warm_piper()
+            return _pipe
+        _tts_backend = "kokoro"
+        _ensure_espeak()
+        # Before kokoro makes this run's scratch dirs, clear the ones
+        # earlier runs could not clean up on their way out.
+        _sweep_orphan_espeak_tempdirs()
+        from kokoro import KPipeline
+        # The voice name's first letter IS the language pipeline:
+        # a=American English, b=British English, e/f/h/i/j/p/z = the
+        # other shipped languages. bm_lewis -> 'b'.
+        lang = (CFG["voice"] or "bm_lewis")[0]
+        log(f"[mouth] loading kokoro (lang '{lang}', "
+            f"voice {CFG['voice']})...")
+        _pipe = KPipeline(lang_code=lang)
+        log("[mouth] voice ready")
     return _pipe
 
 
@@ -189,6 +242,48 @@ def _stream_kokoro(text: str):
     except (TypeError, ValueError):
         speed = 1.0
     for _, _, audio in pipe(text, voice=CFG["voice"], speed=speed):
+        a = np.asarray(audio, dtype=np.float32)
+        if a.size:
+            yield (np.clip(a, -1.0, 1.0) * 32767).astype(np.int16)
+
+
+def _espeak_ipa_clauses(text: str, espeak_voice: str) -> list[str]:
+    """jarvis fork: system espeak-ng -> IPA phoneme lines (one per clause).
+    Replaces piper's C `espeakbridge` (no win-arm64 build)."""
+    import subprocess
+
+    try:
+        r = subprocess.run(
+            [_espeak_exe(), "-q", "--ipa", "-v", espeak_voice, text],
+            capture_output=True, text=True, encoding="utf-8", timeout=15,
+        )
+    except (OSError, subprocess.TimeoutExpired) as e:
+        log(f"[mouth] espeak-ng failed: {e}")
+        return []
+    return [ln.strip() for ln in (r.stdout or "").splitlines() if ln.strip()]
+
+
+def _stream_piper(text: str):
+    """One sentence -> int16 PCM chunks at the voice's native rate."""
+    import unicodedata
+
+    from piper import SynthesisConfig
+
+    voice = warm()
+    try:
+        length = 1.0 / float(CFG.get("speed") or 1.0)
+    except (TypeError, ValueError):
+        length = 1.0
+    cfg = SynthesisConfig(length_scale=length, normalize_audio=False)
+    espeak_voice = voice.config.espeak_voice or "en-us"
+    for clause in _espeak_ipa_clauses(text, espeak_voice):
+        phonemes = list(unicodedata.normalize("NFD", clause + " ."))
+        try:
+            ids = voice.phonemes_to_ids(phonemes)
+            audio = voice.phoneme_ids_to_audio(ids, cfg)
+        except Exception as e:  # a bad clause must not kill the reply
+            log(f"[mouth] piper synth error on a clause: {e}")
+            continue
         a = np.asarray(audio, dtype=np.float32)
         if a.size:
             yield (np.clip(a, -1.0, 1.0) * 32767).astype(np.int16)
@@ -327,9 +422,14 @@ def synth_stream(text: str, timeout: float = 30.0):
             return
         except Exception as e:
             log(f"[mouth] elevenlabs failed ({str(e)[:60]}) — "
-                f"falling back to {CFG['voice']}")
-    for pcm in _stream_kokoro(text):
-        yield KOKORO_RATE, pcm
+                f"falling back to the local voice")
+    warm()  # sets _tts_backend
+    if _tts_backend == "piper":
+        for pcm in _stream_piper(text):
+            yield _piper_rate, pcm
+    else:
+        for pcm in _stream_kokoro(text):
+            yield KOKORO_RATE, pcm
 
 
 class Mouth:

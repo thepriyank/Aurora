@@ -220,8 +220,22 @@ def _full_detail(tool, tool_input, ctx):
 
 
 def make_permission_gate(mouth):
-    from claude_agent_sdk import (PermissionResultAllow,
-                                  PermissionResultDeny)
+    try:
+        from claude_agent_sdk import (PermissionResultAllow,
+                                      PermissionResultDeny)
+    except ImportError:
+        # jarvis fork: brain="local" doesn't install the Claude SDK (and it has
+        # no win-arm64 wheel). LocalBrain's dispatcher only duck-types
+        # .behavior / .message, so a stand-in with the same shape is enough.
+        class PermissionResultAllow:  # noqa: N801
+            def __init__(self, behavior="allow"):
+                self.behavior = behavior
+
+        class PermissionResultDeny:  # noqa: N801
+            def __init__(self, behavior="deny", message="", interrupt=False):
+                self.behavior = behavior
+                self.message = message
+                self.interrupt = interrupt
 
     async def gate(tool, tool_input, ctx):
         if _AUTOAPPROVE["on"]:

@@ -32,10 +32,26 @@ import threading
 
 import numpy as np
 import sounddevice as sd
-import webrtcvad
 
 from backtalk.config import CFG
 from backtalk.vlog import log
+
+try:
+    import webrtcvad
+except ImportError:  # jarvis fork: no win-arm64 wheel and no compiler assumed.
+    # PTT (record_held) doesn't use VAD; open-mic falls back to an energy gate.
+    class _EnergyVad:
+        _THRESH = 550.0  # int16 RMS
+
+        def __init__(self, _aggressiveness: int = 2) -> None:
+            pass
+
+        def is_speech(self, frame_bytes: bytes, _rate: int) -> bool:
+            a = np.frombuffer(frame_bytes, dtype=np.int16).astype(np.float32)
+            return bool(a.size) and float(np.sqrt(np.mean(a * a))) > self._THRESH
+
+    class webrtcvad:  # noqa: N801 - shim to match `webrtcvad.Vad(...)`
+        Vad = _EnergyVad
 
 RATE = 16000
 FRAME_MS = 30
@@ -269,6 +285,27 @@ def _probe(model):
     list(segments)
 
 
+_ONNX_ASR_IDS = frozenset({
+    "whisper-base", "nemo-parakeet-ctc-0.6b", "nemo-parakeet-rnnt-0.6b",
+    "nemo-parakeet-tdt-0.6b-v2", "nemo-parakeet-tdt-0.6b-v3",
+})
+
+
+def _want_onnx_asr() -> bool:
+    """jarvis fork: use onnx-asr when config asks for it, or when
+    faster-whisper can't be imported (no ctranslate2 wheel on this platform)."""
+    engine = str(CFG.get("stt_engine", "") or "").lower().replace("_", "-")
+    if engine in ("onnx-asr", "onnx"):
+        return True
+    if engine in ("faster-whisper", "mlx"):
+        return False
+    try:
+        import faster_whisper  # noqa: F401
+        return False
+    except ImportError:
+        return True
+
+
 def warm():
     """Load the STT model (first call downloads it to the HF cache).
     Called at startup while the greeting plays, so the first real
@@ -277,7 +314,21 @@ def warm():
     check_microphone()
     with _model_lock:
         if _model is None:
-            if _apple_gpu_available():
+            if _want_onnx_asr():
+                # jarvis fork: onnxruntime STT for platforms without a
+                # ctranslate2 wheel (Windows/ARM64). onnx-asr only ships
+                # `whisper-base` among Whisper sizes.
+                import os as _os
+                _os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS", "1")
+                import onnx_asr
+                name = CFG["stt_model"]
+                if name not in _ONNX_ASR_IDS:
+                    name = "whisper-base"
+                log(f"[ears] loading {name} (onnx-asr / onnxruntime, CPU)...")
+                _model = onnx_asr.load_model(name)
+                _model.recognize(np.zeros(RATE // 5, dtype=np.float32))  # warm
+                _backend = "onnx-asr"
+            elif _apple_gpu_available():
                 import mlx_whisper
                 repo = _mlx_repo(CFG["stt_model"])
                 log(f"[ears] loading {CFG['stt_model']} on the Apple GPU...")
@@ -330,7 +381,9 @@ def transcribe(pcm: np.ndarray) -> str:
     model = warm()
     audio = pcm.astype(np.float32) / 32768.0
     lang = "en" if CFG["stt_model"].endswith(".en") else None
-    if _backend == "mlx":
+    if _backend == "onnx-asr":
+        text = (model.recognize(audio, sample_rate=RATE) or "").strip()
+    elif _backend == "mlx":
         import mlx_whisper
         text = mlx_whisper.transcribe(audio, path_or_hf_repo=model,
                                       temperature=0.0, language=lang,

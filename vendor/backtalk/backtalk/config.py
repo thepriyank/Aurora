@@ -138,6 +138,14 @@ DEFAULTS = {
     # "auto" uses CUDA when present, otherwise CPU. int8 keeps CPU fast.
     "stt_device": "auto",
     "stt_compute": "int8",
+    # --- jarvis fork: STT/TTS engine selection. "" auto-detects: onnx-asr +
+    #     piper on platforms with no ctranslate2/torch wheel (Windows/ARM64),
+    #     else faster-whisper + kokoro. Force with "onnx-asr"/"faster-whisper"
+    #     and "piper"/"kokoro". onnx-asr only ships Whisper "whisper-base".
+    "stt_engine": "",
+    "tts_engine": "",
+    "piper_voice": "en_GB-alan-medium",
+    "espeak_exe": "",   # path to espeak-ng; "" = find on PATH / default install
     # The microphone to record from, matched by NAME. "" means whatever
     # the OS calls the default input, which is right on most machines.
     #

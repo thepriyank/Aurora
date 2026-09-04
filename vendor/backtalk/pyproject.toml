@@ -7,10 +7,20 @@ dependencies = [
     # --- jarvis fork: the local-LLM brain (used when backtalk.json has
     #     "brain": "local"). The Claude path below still works with "claude". ---
     "jarvis-brain",
-    "claude-agent-sdk>=0.2.100",
-    "faster-whisper>=1.0.0",
+    # claude-agent-sdk (the brain:"claude" bisect path) pulls cryptography via
+    # mcp, which has no win-arm64 wheel and needs a Rust toolchain to build.
+    # Our default is brain:"local", so make it optional on win-arm64.
+    "claude-agent-sdk>=0.2.100 ; sys_platform != 'win32' or platform_machine != 'ARM64'",
     "httpx>=0.27.0",
-    "kokoro>=0.9.0",
+    # --- jarvis fork: Windows/ARM64 has no ctranslate2 (faster-whisper) or
+    #     torch (kokoro) wheel, so that whole path can't run natively. On
+    #     win-arm64 use an onnxruntime stack instead: onnx-asr for STT,
+    #     piper for TTS. ears.py / mouth.py pick the engine (config
+    #     stt_engine / tts_engine, else auto by what imports). ---
+    "faster-whisper>=1.0.0 ; sys_platform != 'win32' or platform_machine != 'ARM64'",
+    "kokoro>=0.9.0 ; sys_platform != 'win32' or platform_machine != 'ARM64'",
+    "onnx-asr[hub]>=0.5.0 ; sys_platform == 'win32' and platform_machine == 'ARM64'",
+    "piper-tts>=1.3.0 ; sys_platform == 'win32' and platform_machine == 'ARM64'",
     # Apple Silicon only: runs the SAME whisper model on the GPU.
     # CTranslate2 (under faster-whisper) has no Metal backend, so
     # without this every Mac transcribes on the CPU. Measured 0.88s
@@ -27,7 +37,9 @@ dependencies = [
     # and dies demanding Visual C++ Build Tools. webrtcvad-wheels is the
     # same code with binary wheels, importing as the identical module.
     "webrtcvad>=2.0.10 ; sys_platform != 'win32'",
-    "webrtcvad-wheels>=2.0.10 ; sys_platform == 'win32'",
+    # webrtcvad-wheels has no win-arm64 wheel and no compiler is assumed;
+    # ears.py falls back to an energy VAD there (PTT doesn't use VAD anyway).
+    "webrtcvad-wheels>=2.0.10 ; sys_platform == 'win32' and platform_machine != 'ARM64'",
 ]
 
 [tool.setuptools]
