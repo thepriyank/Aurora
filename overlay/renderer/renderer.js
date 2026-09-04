@@ -118,16 +118,12 @@ function loadModel(pathStr) {
       });
       spineBones.sort((a, b) => a.name.localeCompare(b.name));
 
-      if (gltf.animations && gltf.animations.length) {
-        // The bundled clip is usually just the rest pose; only play it if it
-        // actually has multiple keyframes.
-        const clip = gltf.animations[0];
-        const long = clip.tracks.some((t) => t.times.length > 2);
-        if (long) {
-          mixer = new THREE.AnimationMixer(model);
-          mixer.clipAction(clip).play();
-        }
-      }
+      // Deliberately NOT auto-playing gltf.animations[0]: on this model it's a
+      // real baked loop (legs, arms, the works), not a rest pose — an
+      // AnimationMixer would drive every bone every frame and stomp the
+      // state-reactive procedural motion below into invisibility. If a model
+      // ships a clip worth using later, wire it explicitly per state instead
+      // of autoplaying whatever track 0 happens to be.
 
       showFallback(false);
     },
