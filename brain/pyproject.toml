@@ -16,3 +16,6 @@ packages = ["jarvis_brain", "jarvis_brain.providers", "jarvis_brain.tools"]
 
 [tool.uv]
 package = true
+# On Windows/ARM64 uv's managed CPython is x86-64 and runs under emulation
+# (~10x slower for torch / whisper). Prefer a native system Python.
+python-preference = "system"

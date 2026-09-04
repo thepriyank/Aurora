@@ -5,6 +5,7 @@
     .\start.ps1                # voice mode (default)
     .\start.ps1 voice
     .\start.ps1 chat           # text REPL against the local brain, no mic
+    .\start.ps1 demo           # text REPL that also drives the overlay avatar
     .\start.ps1 configure      # (re)run the local-LLM setup wizard
     .\start.ps1 overlay        # desktop 3D avatar overlay (separate process)
 
@@ -57,6 +58,13 @@ if ($Mode -eq "chat") {
   Brain @("check") | Out-Null
   if ($LASTEXITCODE -ne 0) { if ((Brain @("configure")) -ne 0) { exit 1 } }
   exit (Brain @("chat"))
+}
+
+if ($Mode -eq "demo") {
+  Brain @("check") | Out-Null
+  if ($LASTEXITCODE -ne 0) { if ((Brain @("configure")) -ne 0) { exit 1 } }
+  Write-Host "Typed chat + overlay avatar. Run '.\start.ps1 overlay' in another window." -ForegroundColor Cyan
+  exit (Brain @("chat", "--overlay"))
 }
 
 # --- ensure the brain is configured & ready --------------------------------

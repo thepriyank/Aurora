@@ -2,7 +2,8 @@
 
     configure [--defaults]   first-run wizard: vault, local model, big brain
     check                    exit 0 iff ready to run (used by start.ps1/.sh)
-    chat                     a plain REPL against the brain (no voice)
+    chat [--overlay]         a REPL against the brain; --overlay drives the
+                             desktop avatar via the signal bus (no STT/TTS)
     server [--host H --port P]  HTTP front: POST /turn (SSE), GET /health
     keys                     add / list big-brain + specialized API providers
 """
@@ -12,7 +13,7 @@ import asyncio
 import sys
 
 
-def _chat() -> int:
+def _chat(overlay: bool = False) -> int:
     # Windows consoles default to a legacy codepage; force UTF-8 so Hindi /
     # Hinglish input and output survive the REPL. (backtalk feeds text via STT,
     # not stdin, so this only matters for this dev REPL.)
@@ -25,6 +26,13 @@ def _chat() -> int:
     from . import core, escalation, memory
     from .config import ConfigError, load_brain_cfg, load_persona
     from .tools import Dispatcher, load_tools_config, ollama_schemas
+
+    feed = None
+    if overlay:
+        from .busfeed import BusFeed
+        feed = BusFeed()
+        feed.idle()
+        print(f"[overlay] writing the signal bus to {feed.dir}")
 
     try:
         cfg = load_brain_cfg(required=True)
@@ -62,6 +70,8 @@ def _chat() -> int:
         reply: list[str] = []
         asked, want_big = escalation.detect(text)
         hint, tags = memory.recall_context(asked, tools_cfg.roots["vault"])
+        if feed:
+            feed.state("thinking")
 
         if want_big:
             esc = escalation.Escalation(cfg)
@@ -69,11 +79,17 @@ def _chat() -> int:
                                              discipline=disc, touched_tags=tags):
                 print(f"  {sentence}", flush=True)
                 reply.append(sentence)
+                if feed:
+                    await feed.speak_sentence(sentence)
+            if feed:
+                feed.idle()
             if esc.answered_big:
                 history.append({"role": "user", "content": asked})
                 history.append({"role": "assistant", "content": " ".join(reply).strip()})
                 return
             text = asked  # refused / all providers failed -> local answers
+            if feed:
+                feed.state("thinking")
 
         async for sentence in core.run_turn(
             text, history, brain_cfg=cfg, persona=persona, discipline=disc,
@@ -81,6 +97,10 @@ def _chat() -> int:
         ):
             print(f"  {sentence}", flush=True)
             reply.append(sentence)
+            if feed:
+                await feed.speak_sentence(sentence)
+        if feed:
+            feed.idle()
         joined = " ".join(reply).strip()
         if joined:
             history.append({"role": "user", "content": text})
@@ -96,8 +116,12 @@ def _chat() -> int:
             text = input("you> ").strip()
         except (EOFError, KeyboardInterrupt):
             print()
+            if feed:
+                feed.idle()
             return 0
         if text.lower() in {"exit", "quit"}:
+            if feed:
+                feed.idle()
             return 0
         if not text:
             continue
@@ -105,6 +129,8 @@ def _chat() -> int:
             asyncio.run(turn(text))
         except Exception as e:  # noqa: BLE001 - REPL: show and keep going
             print(f"  ! {e}", file=sys.stderr)
+            if feed:
+                feed.idle()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -119,7 +145,7 @@ def main(argv: list[str] | None = None) -> int:
         from .configure import check
         return check()
     if cmd == "chat":
-        return _chat()
+        return _chat(overlay="--overlay" in rest)
     if cmd == "keys":
         from .configure import run_keys
         return run_keys()
