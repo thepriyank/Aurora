@@ -81,15 +81,22 @@ if (-not (Test-Path $Backtalk)) {
 }
 $btJson = Join-Path $Backtalk "backtalk.json"
 if (-not (Test-Path $btJson)) {
-  $name = "Aria"
+  $name = "Aurora"
+  $aliases = @()
   $jj = Join-Path $Root "config\jarvis.json"
-  if (Test-Path $jj) { try { $name = (Get-Content $jj -Raw | ConvertFrom-Json).name } catch {} }
+  if (Test-Path $jj) {
+    try {
+      $ident = Get-Content $jj -Raw | ConvertFrom-Json
+      $name = $ident.name
+      $aliases = @($ident.nicknames)
+    } catch {}
+  }
   @{
     brain      = "local"
     agent_dir  = $Root
     name       = $name
+    aliases    = $aliases
     ptt_key    = "home"
-    voice      = "bm_lewis"
     stt_model  = "small.en"
     signals_dir = $Backtalk
   } | ConvertTo-Json | Set-Content $btJson -Encoding utf8

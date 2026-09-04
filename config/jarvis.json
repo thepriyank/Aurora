@@ -1,6 +1,7 @@
 {
-  "name": "Aria",
-  "wake_words": ["hey aria", "aria"],
+  "name": "Aurora",
+  "nicknames": ["Rory"],
+  "wake_words": ["hey aurora", "aurora", "hey rory", "rory"],
   "languages": ["en", "hi"],
   "default_language": "en",
   "vault_path": "",

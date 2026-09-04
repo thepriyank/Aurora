@@ -44,17 +44,19 @@ fi
 
 BT_JSON="$BACKTALK/backtalk.json"
 if [ ! -f "$BT_JSON" ]; then
-  NAME="Aria"
+  NAME="Aurora"
+  ALIASES="[]"
   if [ -f "$ROOT/config/jarvis.json" ]; then
-    NAME="$(python3 -c "import json,sys;print(json.load(open('$ROOT/config/jarvis.json')).get('name','Aria'))" 2>/dev/null || echo Aria)"
+    NAME="$(python3 -c "import json,sys;print(json.load(open('$ROOT/config/jarvis.json')).get('name','Aurora'))" 2>/dev/null || echo Aurora)"
+    ALIASES="$(python3 -c "import json,sys;print(json.dumps(json.load(open('$ROOT/config/jarvis.json')).get('nicknames',[])))" 2>/dev/null || echo '[]')"
   fi
   cat > "$BT_JSON" <<EOF
 {
   "brain": "local",
   "agent_dir": "$ROOT",
   "name": "$NAME",
+  "aliases": $ALIASES,
   "ptt_key": "home",
-  "voice": "bm_lewis",
   "stt_model": "small.en",
   "signals_dir": "$BACKTALK"
 }
