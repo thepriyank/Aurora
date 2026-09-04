@@ -1,0 +1,17 @@
+{
+  "name": "jarvis-overlay",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Transparent, always-on-top 3D avatar overlay for the Jarvis assistant. Reads backtalk's signal bus.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "check": "node -c main.js && node -c preload.js && node -c bus.js && node -c config.js && echo ok"
+  },
+  "dependencies": {
+    "three": "^0.169.0"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0"
+  }
+}

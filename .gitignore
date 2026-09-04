@@ -44,3 +44,10 @@ config/tools.yaml
 # brain runtime logs
 brain/audit.jsonl
 brain/usage.jsonl
+
+# 3D avatar source model (large binary, local only)
+rory-avatar/
+
+# desktop overlay runtime
+overlay/jarvis-overlay.json
+overlay/models/

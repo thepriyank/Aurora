@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: file:; connect-src 'self' file: data: blob:; worker-src 'self' blob:" />
+  <link rel="stylesheet" href="./style.css" />
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "../node_modules/three/build/three.module.js",
+      "three/addons/": "../node_modules/three/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <canvas id="stage"></canvas>
+
+  <!-- reduced-motion / load-failure fallback: a calm CSS orb that still reacts to state -->
+  <div id="fallback" hidden>
+    <div class="orb"></div>
+  </div>
+
+  <div id="hint">drag to move · scroll to resize</div>
+
+  <script type="module" src="./renderer.js"></script>
+</body>
+</html>

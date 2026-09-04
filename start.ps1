@@ -6,6 +6,7 @@
     .\start.ps1 voice
     .\start.ps1 chat           # text REPL against the local brain, no mic
     .\start.ps1 configure      # (re)run the local-LLM setup wizard
+    .\start.ps1 overlay        # desktop 3D avatar overlay (separate process)
 
   On first run (or whenever the brain isn't ready) it runs the setup wizard
   before starting the voice line.
@@ -37,6 +38,20 @@ function Brain($cmdArgs) {
 }
 
 if ($Mode -eq "configure") { exit (Brain @("configure")) }
+
+if ($Mode -eq "overlay") {
+  Need "npm" "Install Node.js: https://nodejs.org"
+  $Overlay = Join-Path $Root "overlay"
+  Push-Location $Overlay
+  try {
+    if (-not (Test-Path (Join-Path $Overlay "node_modules"))) {
+      Write-Host "Installing overlay deps (one-time)..." -ForegroundColor Cyan
+      npm install
+    }
+    npm start
+  } finally { Pop-Location }
+  exit $LASTEXITCODE
+}
 
 if ($Mode -eq "chat") {
   Brain @("check") | Out-Null

@@ -5,6 +5,7 @@
 #   ./start.sh voice
 #   ./start.sh chat         # text REPL against the local brain, no mic
 #   ./start.sh configure    # (re)run the local-LLM setup wizard
+#   ./start.sh overlay      # desktop 3D avatar overlay (separate process)
 #
 # First run (or whenever the brain isn't ready) runs the setup wizard first.
 set -euo pipefail
@@ -21,6 +22,13 @@ command -v uv >/dev/null 2>&1 || { echo "Missing 'uv': https://github.com/astral
 brain() { ( cd "$BRAIN" && uv run python -m jarvis_brain "$@" ); }
 
 if [ "$MODE" = "configure" ]; then brain configure; exit $?; fi
+
+if [ "$MODE" = "overlay" ]; then
+  command -v npm >/dev/null 2>&1 || { echo "Missing 'npm': https://nodejs.org"; exit 1; }
+  cd "$ROOT/overlay"
+  [ -d node_modules ] || { echo "Installing overlay deps (one-time)..."; npm install; }
+  exec npm start
+fi
 
 if [ "$MODE" = "chat" ]; then
   brain check >/dev/null 2>&1 || brain configure || exit 1
