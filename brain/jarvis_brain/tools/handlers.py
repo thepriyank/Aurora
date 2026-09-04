@@ -278,10 +278,12 @@ def _vault(roots) -> Path:
 
 
 def vault_append_daily_note(roots, cfg, *, text: str) -> str:
+    from ..config import device_name
+
     v = _vault(roots)
     d = v / "01 - Daily Notes"
     d.mkdir(parents=True, exist_ok=True)
-    f = d / f"{date.today():%Y-%m-%d}.md"
+    f = d / f"{date.today():%Y-%m-%d}.{device_name()}.md"  # per-device shard
     fresh = not f.exists()
     with f.open("a", encoding="utf-8") as fh:
         if fresh:

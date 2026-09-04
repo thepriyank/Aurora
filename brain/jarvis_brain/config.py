@@ -49,6 +49,52 @@ def _expand(p: str | None) -> str:
 
 
 # --------------------------------------------------------------------------- #
+# vault + device — the one place these are resolved (Phase 3)
+# --------------------------------------------------------------------------- #
+def _slug(s: str) -> str:
+    out = "".join(c if c.isalnum() else "-" for c in s.strip().lower())
+    return "-".join(filter(None, out.split("-"))) or "device"
+
+
+def vault_dir() -> Path:
+    """The Obsidian memory vault. `vault_path` in config/jarvis.json when set
+    (Phase 3 points it at a Google-Drive-synced folder); otherwise a repo-local
+    `Vault/` that is git-ignored."""
+    v = (load_jarvis_json().get("vault_path") or "").strip()
+    return Path(os.path.expanduser(v)) if v else REPO_ROOT / "Vault"
+
+
+def device_name() -> str:
+    """Short slug identifying this machine — used for per-device daily-note
+    shards so two devices never write the same file the same minute."""
+    import socket
+
+    name = (load_jarvis_json().get("device_name") or "").strip()
+    if not name:
+        try:
+            name = socket.gethostname()
+        except OSError:
+            name = "device"
+    return _slug(name)
+
+
+def dated_shard(subdir: str) -> Path:
+    """Today's per-device file, e.g. `<vault>/01 - Daily Notes/2026-09-04.laptop.md`.
+    The nightly consolidation job (scripts/vault_consolidate.py) merges these
+    into the plain `<date>.md`."""
+    from datetime import date
+
+    return vault_dir() / subdir / f"{date.today():%Y-%m-%d}.{device_name()}.md"
+
+
+def dated_note(subdir: str) -> Path:
+    """Today's consolidated file, `<vault>/<subdir>/<date>.md`."""
+    from datetime import date
+
+    return vault_dir() / subdir / f"{date.today():%Y-%m-%d}.md"
+
+
+# --------------------------------------------------------------------------- #
 # models.yaml
 # --------------------------------------------------------------------------- #
 @dataclass
@@ -185,6 +231,15 @@ def load_jarvis_json() -> dict:
         return json.loads(JARVIS_JSON.read_text(encoding="utf-8"))
     except (FileNotFoundError, ValueError):
         return {}
+
+
+def save_jarvis_json(data: dict) -> None:
+    """Write config/jarvis.json, keeping keys sorted-ish by preserving order of
+    what's passed in."""
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    JARVIS_JSON.write_text(
+        json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
 
 
 _PERSONA_START = "<!-- PERSONA:START -->"

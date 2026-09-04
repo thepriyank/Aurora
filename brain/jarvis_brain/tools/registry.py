@@ -14,7 +14,7 @@ from typing import Any, Callable
 
 import yaml
 
-from ..config import CONFIG_DIR, REPO_ROOT, load_jarvis_json
+from ..config import CONFIG_DIR, load_jarvis_json, vault_dir
 from . import handlers as H
 
 Tier = str  # "auto" | "confirm" | "never"
@@ -59,14 +59,12 @@ class ToolsConfig:
 
 
 def _default_roots() -> dict[str, Path]:
-    ident = load_jarvis_json()
-    vault = (ident.get("vault_path") or "").strip()
-    workspace = (ident.get("workspace_path") or "~/jarvis-workspace").strip()
+    workspace = (load_jarvis_json().get("workspace_path") or "~/jarvis-workspace").strip()
     # workspace first: a bare relative path in a file task lands here, not in
     # the memory vault. vault.* tools always pass their own {"vault": ...}.
     roots = {
         "workspace": Path(os.path.expanduser(workspace)),
-        "vault": Path(os.path.expanduser(vault)) if vault else REPO_ROOT / "Vault",
+        "vault": vault_dir(),
     }
     for p in roots.values():
         p.mkdir(parents=True, exist_ok=True)

@@ -19,6 +19,8 @@ import sys
 import time
 from getpass import getpass
 
+from pathlib import Path
+
 from .config import (
     REPO_ROOT,
     BigProviderCfg,
@@ -26,8 +28,12 @@ from .config import (
     ConfigError,
     LocalModelCfg,
     MODELS_YAML,
+    device_name,
     load_brain_cfg,
+    load_jarvis_json,
     save_brain_cfg,
+    save_jarvis_json,
+    vault_dir,
 )
 from .providers.ollama import OllamaClient, OllamaDown
 
@@ -127,6 +133,86 @@ def _ask(prompt: str, default: str = "") -> str:
     except EOFError:
         ans = ""
     return ans or default
+
+
+# --------------------------------------------------------------------------- #
+# vault (Phase 3) — chosen on first run
+# --------------------------------------------------------------------------- #
+_VAULT_SUBDIRS = ["01 - Daily Notes", "04 - Sessions", "People", "Projects"]
+
+_VAULT_INDEX_STUB = """\
+# VAULT-INDEX
+
+The assistant reads this file to know the shape of your memory. Edit freely.
+
+## Profile
+- (a line or two about you — the assistant primes on this)
+
+## Note sets
+Named lists of notes the assistant reads before a task. Format: `name: A.md, B.md`
+
+- coding: Projects/Notes.md, People/Me.md
+- personal: People/Me.md
+"""
+
+_VAULT_README = """\
+# Memory vault
+
+Plain-markdown memory for the assistant. Put this folder inside your
+Google Drive (or iCloud / Dropbox) sync root so every device shares it.
+`scripts/vault_commit.py` snapshots it with git every 30 minutes.
+See `docs/SYNC.md` in the Jarvis repo.
+"""
+
+
+def _guess_vault_path() -> str:
+    home = Path.home()
+    sysname = platform.system()
+    candidates: list[Path] = []
+    if sysname == "Windows":
+        candidates += [home / "My Drive", home / "Google Drive" / "My Drive",
+                       home / "Google Drive", home / "OneDrive"]
+    elif sysname == "Darwin":
+        cs = home / "Library" / "CloudStorage"
+        if cs.is_dir():
+            candidates += sorted(cs.glob("GoogleDrive-*/My Drive"))
+        candidates += [home / "Google Drive" / "My Drive", home / "Google Drive"]
+    for base in candidates:
+        if base.is_dir():
+            return str(base / "Jarvis Vault")
+    return str(home / "Jarvis Vault")
+
+
+def _scaffold_vault(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    for sub in _VAULT_SUBDIRS:
+        (path / sub).mkdir(exist_ok=True)
+    idx = path / "VAULT-INDEX.md"
+    if not idx.exists():
+        idx.write_text(_VAULT_INDEX_STUB, encoding="utf-8")
+    rd = path / "README.md"
+    if not rd.exists():
+        rd.write_text(_VAULT_README, encoding="utf-8")
+
+
+def _choose_vault(existing_path: str) -> tuple[str, str]:
+    """Returns (vault_path, device_name). Creates the folder + skeleton."""
+    _p()
+    _p("Memory vault")
+    _p("───────────")
+    _p("A folder of plain markdown the assistant remembers you in. Put it inside")
+    _p("your Google Drive sync root and every device shares one memory.")
+    default = existing_path or _guess_vault_path()
+    raw = _ask("Vault folder", default=default)
+    path = Path(os.path.expanduser(raw)).resolve()
+    try:
+        _scaffold_vault(path)
+        _p(f"✓ vault ready at {path}")
+    except OSError as e:
+        _p(f"⚠  could not create {path}: {e}  (set vault_path by hand later)")
+    dev = _ask("Short name for THIS device (for per-device note files)",
+               default=device_name())
+    return str(path), dev
 
 
 # --------------------------------------------------------------------------- #
@@ -253,6 +339,25 @@ def run_wizard(*, use_defaults: bool = False) -> int:
         _p("  Or accept defaults:  python -m jarvis_brain configure --defaults")
         return 2
 
+    ident = load_jarvis_json()
+
+    # --- Phase 3: pick the memory vault --------------------------------------
+    if use_defaults:
+        if not ident.get("vault_path"):
+            v = _guess_vault_path()
+            try:
+                _scaffold_vault(Path(os.path.expanduser(v)))
+            except OSError:
+                pass
+            ident["vault_path"] = v
+            ident.setdefault("device_name", device_name())
+            save_jarvis_json(ident)
+    else:
+        vpath, dev = _choose_vault(ident.get("vault_path", ""))
+        ident["vault_path"] = vpath
+        ident["device_name"] = dev
+        save_jarvis_json(ident)
+
     _ensure_ollama_binary()
     base_url = existing.local.base_url or "http://localhost:11434"
     client = OllamaClient(base_url=base_url)
@@ -316,7 +421,10 @@ def check() -> int:
     if not _run(client.has_model(cfg.local.model)):
         _p(f"model {cfg.local.model} not pulled")
         return 4
+    v = vault_dir()
+    vtag = str(v) if load_jarvis_json().get("vault_path") else f"{v} (repo-local, not synced)"
     _p(f"ready: {cfg.local.model} @ {cfg.local.base_url}")
+    _p(f"vault: {vtag}")
     return 0
 
 

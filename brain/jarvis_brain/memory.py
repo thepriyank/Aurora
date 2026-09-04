@@ -18,7 +18,7 @@ from datetime import date
 from difflib import SequenceMatcher
 from pathlib import Path
 
-from .config import BrainCfg
+from .config import BrainCfg, device_name
 from .providers.ollama import OllamaClient
 
 _SYS = (
@@ -87,7 +87,8 @@ def recall_hint(user_text: str, vault: Path, *, max_lines: int = 6) -> str:
 
 
 def _daily_note(vault: Path) -> Path:
-    return vault / "01 - Daily Notes" / f"{date.today():%Y-%m-%d}.md"
+    # per-device shard (Phase 3); the nightly job merges into <date>.md
+    return vault / "01 - Daily Notes" / f"{date.today():%Y-%m-%d}.{device_name()}.md"
 
 
 def _target(vault: Path, category: str) -> Path:

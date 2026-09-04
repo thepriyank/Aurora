@@ -1,35 +1,25 @@
 """Session transcripts — every turn appended to a plain-markdown note.
 
-Phase 1 requirement: the model gets its short conversation window from memory,
-but the *human-readable* transcript is also written to
+The model gets its short conversation window from memory, but the
+human-readable transcript is also written to
 
-    <vault>/04 - Sessions/<date>.md
+    <vault>/04 - Sessions/<date>.<device>.md
 
-so it syncs with the Obsidian vault (Phase 3) and can be re-read later. One file
-per local date, one block per turn, append-only.
+Per-device filename (Phase 3): two machines never touch the same file the same
+minute, so a Drive sync never has to merge. The nightly consolidation job
+(scripts/vault_consolidate.py) folds the day's shards into <date>.md.
 
-Kept deliberately dumb. A write failure never breaks a turn — it logs to stderr
-and the conversation carries on.
+A write failure never breaks a turn — it logs to stderr and the conversation
+carries on.
 """
 from __future__ import annotations
 
-import os
 import sys
 from datetime import datetime
-from pathlib import Path
 
-from .config import REPO_ROOT, load_jarvis_json
+from .config import dated_shard, load_jarvis_json
 
 _SUBDIR = "04 - Sessions"
-
-
-def sessions_dir() -> Path:
-    """`<vault_path>/04 - Sessions` when a vault is configured, else a repo-local
-    `Vault/04 - Sessions` (already git-ignored). Phase 3 points vault_path at the
-    Drive-synced folder and this starts syncing for free."""
-    vault = (load_jarvis_json().get("vault_path") or "").strip()
-    base = Path(os.path.expanduser(vault)) if vault else (REPO_ROOT / "Vault")
-    return base / _SUBDIR
 
 
 class SessionLog:
@@ -37,18 +27,14 @@ class SessionLog:
 
     def __init__(self, *, speaker: str | None = None) -> None:
         self._speaker = speaker or load_jarvis_json().get("name", "Assistant")
-        self._dir = sessions_dir()
-
-    def _today_file(self) -> Path:
-        return self._dir / f"{datetime.now():%Y-%m-%d}.md"
 
     def append(self, user_text: str, reply_text: str) -> None:
         user_text, reply_text = user_text.strip(), reply_text.strip()
         if not user_text and not reply_text:
             return
         try:
-            self._dir.mkdir(parents=True, exist_ok=True)
-            path = self._today_file()
+            path = dated_shard(_SUBDIR)
+            path.parent.mkdir(parents=True, exist_ok=True)
             fresh = not path.exists()
             with path.open("a", encoding="utf-8") as f:
                 if fresh:

@@ -4,6 +4,7 @@
   "languages": ["en", "hi"],
   "default_language": "en",
   "vault_path": "",
+  "device_name": "",
   "workspace_path": "~/jarvis-workspace",
 
   "trigger_phrases": {
