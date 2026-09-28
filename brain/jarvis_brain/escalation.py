@@ -21,6 +21,7 @@ from .config import BrainCfg, env_value, load_jarvis_json
 from .core import _SENTENCE_END, _ThinkFilter, build_messages
 from .providers import anthropic as anthropic_p
 from .providers import cli_bridge, openai_compat
+from .providers.ollama import OllamaClient
 
 
 def _phrases() -> list[str]:
@@ -85,6 +86,16 @@ class Escalation:
             return (
                 anthropic_p.chat_stream(messages, model=prov.model, api_key=key),
                 f"Claude ({prov.model})",
+            )
+        if prov.provider == "ollama":
+            # Ollama Cloud speaks the same native /api/chat as a local server —
+            # just a different host, bearer-token authenticated.
+            client = OllamaClient(
+                base_url=prov.base_url or "https://ollama.com", api_key=key,
+            )
+            return (
+                client.chat_stream(messages, model=prov.model),
+                f"Ollama Cloud ({prov.model})",
             )
         return (
             openai_compat.chat_stream(

@@ -20,6 +20,7 @@ USAGE_PATH = REPO_ROOT / "brain" / "usage.jsonl"
 _RATE_INR = {
     "openrouter": 0.5, "openai": 2.0, "anthropic": 2.0, "groq": 0.1,
     "together": 0.3, "deepseek": 0.1, "mistral": 0.4,
+    "ollama": 0.3,  # Ollama Cloud — rough guess, check your plan's real rate
 }
 
 

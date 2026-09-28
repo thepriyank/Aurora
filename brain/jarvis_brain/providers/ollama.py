@@ -22,6 +22,9 @@ class OllamaDown(OllamaError):
 @dataclass
 class OllamaClient:
     base_url: str = "http://localhost:11434"
+    # set to reach Ollama Cloud (base_url=https://ollama.com) — sent as
+    # `Authorization: Bearer <api_key>`. Empty for a plain local server.
+    api_key: str = ""
     # generous: first token on a cold model can take a while
     connect_timeout: float = 3.0
     read_timeout: float = 300.0
@@ -29,11 +32,14 @@ class OllamaClient:
     def __post_init__(self) -> None:
         self.base_url = self.base_url.rstrip("/")
 
+    def _headers(self) -> dict:
+        return {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
+
     # -- health / inventory -------------------------------------------------- #
     async def is_up(self) -> bool:
         try:
             async with httpx.AsyncClient(timeout=self.connect_timeout) as c:
-                r = await c.get(f"{self.base_url}/api/tags")
+                r = await c.get(f"{self.base_url}/api/tags", headers=self._headers())
                 return r.status_code == 200
         except (httpx.HTTPError, OSError):
             return False
@@ -41,7 +47,7 @@ class OllamaClient:
     async def list_models(self) -> list[str]:
         try:
             async with httpx.AsyncClient(timeout=10.0) as c:
-                r = await c.get(f"{self.base_url}/api/tags")
+                r = await c.get(f"{self.base_url}/api/tags", headers=self._headers())
                 r.raise_for_status()
                 data = r.json()
         except (httpx.HTTPError, OSError) as e:
@@ -64,6 +70,7 @@ class OllamaClient:
                 async with c.stream(
                     "POST", f"{self.base_url}/api/pull",
                     json={"model": model, "stream": True},
+                    headers=self._headers(),
                 ) as resp:
                     resp.raise_for_status()
                     last = ""
@@ -115,7 +122,9 @@ class OllamaClient:
         timeout = httpx.Timeout(self.connect_timeout, read=self.read_timeout)
         try:
             async with httpx.AsyncClient(timeout=timeout) as c:
-                resp = await c.post(f"{self.base_url}/api/chat", json=payload)
+                resp = await c.post(
+                    f"{self.base_url}/api/chat", json=payload, headers=self._headers()
+                )
                 if resp.status_code >= 400:
                     body = resp.text.strip()
                     try:
@@ -158,7 +167,8 @@ class OllamaClient:
         try:
             async with httpx.AsyncClient(timeout=timeout) as c:
                 async with c.stream(
-                    "POST", f"{self.base_url}/api/chat", json=payload
+                    "POST", f"{self.base_url}/api/chat", json=payload,
+                    headers=self._headers(),
                 ) as resp:
                     if resp.status_code == 404:
                         raise OllamaError(

@@ -33,6 +33,19 @@ brain:
       api_key_env: OPENROUTER_API_KEY
       # base_url: https://openrouter.ai/api/v1   # optional; sane default per provider
 
+    # provider: ollama — Ollama Cloud. Same /api/chat shape as your local
+    # server, just hosted, bearer-token authenticated. Key from
+    # ollama.com/settings/keys. Model names are the bare catalog name (e.g.
+    # gpt-oss:20b), not the `:cloud` suffix used in the Ollama CLI/app.
+    # Free accounts only get "starter models" — everything else 402s with
+    # "not included in your free usage". List several as fallbacks; the
+    # first that answers wins. Verify your own account's free set, it moves.
+    - kind: api
+      provider: ollama
+      model: gpt-oss:20b
+      api_key_env: OLLAMA_API_KEY
+      base_url: https://ollama.com   # optional; this is the default
+
   monthly_cloud_cap_inr: 1000        # API spend only; kind=cli calls count as 0
   never_escalate_tags: [private, health, finance_personal, family]
 
